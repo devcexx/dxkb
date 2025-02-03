@@ -1,0 +1,31 @@
+[package]
+name = "dxkb"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["stm32f411"]
+# By default any logging is completely disabled, regardless of the log
+# level, for preventing unnecessary conditionals and debug strings in
+# the final artifact. When this feature is enabled, logging will be
+# enabled and it will be printed to the ITM.
+dev-log = []
+stm32f411 = ["stm32f4/stm32f411", "stm32f4xx-hal/stm32f411"]
+
+[dependencies]
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.5"
+itm_logger = "0.1.2"
+log = "0.4.25"
+panic-itm = "0.4.2"
+seq-macro = "0.3.5"
+stm32f4 = { version = "0.15.1", features = ["cortex-m-rt"] }
+stm32f4xx-hal = { version = "0.22.1", features = ["usb_fs"] }
+synopsys-usb-otg = { version = "0.4.0", features = ["cortex-m", "fs"] }
+usb-device = "0.3.2"
+usbd-hid = "0.8.2"
+vcell = "0.1.3"
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
