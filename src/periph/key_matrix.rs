@@ -5,6 +5,8 @@ use seq_macro::seq;
 use stm32f4xx_hal::{gpio::{Input, Output, Pin, PinState, PushPull}, hal::digital::{InputPin, OutputPin}, pac::GPIOA, time::Hertz};
 use cortex_m::peripheral::DWT;
 
+use crate::dev_info;
+
 use super::gpio::{GpioPort, GpioX};
 macro_rules! output_pins_impl {
     (@ $npins:literal, $($port_const:ident $pin_const:ident)*, $($pin_lit:literal)*) => {
@@ -50,7 +52,7 @@ macro_rules! into_pins_with_same_port_impl {
                impl<const PORT: char, #(const N~i: u8,)*> IntoKeyMatrixInputPinsWithSamePort for (#(Pin<PORT, N~i, Input>,)*) {
                    type Output = PinsWithSamePort<(#(Pin<PORT, N~i, Input>,)*)>;
 
-                   fn into_key_matrix_input_pins_with_same_port(self) -> Self::Output {
+                   fn into_input_pins_with_same_port(self) -> Self::Output {
                        Self::Output {
                            pins: self
                        }
@@ -120,7 +122,7 @@ pub struct SamePortReadResults<T> {
 pub trait IntoKeyMatrixInputPinsWithSamePort {
     type Output;
 
-    fn into_key_matrix_input_pins_with_same_port(self) -> Self::Output;
+    fn into_input_pins_with_same_port(self) -> Self::Output;
 }
 
 /// Represents a set of input ports that are located in the same GPIO
@@ -251,32 +253,25 @@ impl<const ROWS: u8, const COLS: u8, const DEBOUNCE_MILLIS: u8> Debounce<ROWS, C
     fn debounce(&mut self, row: u8, col: u8, current_millis: u32, prev_state: KeyState, last_read_state: KeyState) -> KeyState {
         let wrapped_millis = (current_millis % 254) as u8;
         let last_change_ms = &mut self.last_change_millis[row as usize * COLS as usize + col as usize];
-        return if *last_change_ms == 0xff {
-            // Last change was a long time ago
-            if prev_state != last_read_state {
-                // A change just actually happened. Store the time
-                // when it happened, and return the new state.
-                *last_change_ms = wrapped_millis;
+        if *last_change_ms != 0xff {
+            if Self::diff_time(wrapped_millis, *last_change_ms) < DEBOUNCE_MILLIS {
+                // The last update was recent. Just ignore everything.
+                return prev_state;
             } else {
-                // No change, and timer is already set to the "long time ago" value. Nothing to do.
-            }
-            last_read_state
-        } else {
-            // There was a recent change.
-            if Self::diff_time(wrapped_millis, *last_change_ms) >= DEBOUNCE_MILLIS {
-                info!("Debounce time over for {}; {} ({} ms). Because {} - {} = {}", row, col, current_millis, wrapped_millis, *last_change_ms, Self::diff_time(wrapped_millis, *last_change_ms));
-
-                // If there has been enough time since such change,
-                // just reset the last change value (so the millis
-                // counter doesn't overwrap in the future and starts
-                // breaking things), and apply the new value.
+                // The debounce time have already passed. Mark it as such, and continue.
+                dev_info!("Debounce time over for {}; {} ({} ms). Because {} - {} = {}", row, col, current_millis, wrapped_millis, *last_change_ms, Self::diff_time(wrapped_millis, *last_change_ms));
                 *last_change_ms = 0xff;
-                last_read_state
-            } else {
-                // No enough time has passed since last update, ignore the new value.
-                prev_state
             }
         }
+
+        if prev_state != last_read_state {
+            // If there has been any change, report the change, and
+            // store the time when it happened.
+            dev_info!("Debounce time set in {} ms after {:?}", current_millis, last_read_state);
+            *last_change_ms = wrapped_millis;
+        }
+        return last_read_state
+
     }
 }
 

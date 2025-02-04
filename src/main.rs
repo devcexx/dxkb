@@ -5,11 +5,14 @@
 
 mod periph;
 mod util;
-
+mod keyboard;
+mod hid;
 
 use core::ptr::addr_of_mut;
 
-use periph::key_matrix::{DebouncerEagerPerKey, KeyMatrix, IntoKeyMatrixInputPinsWithSamePort};
+use cortex_m::delay::Delay;
+use hid::KeyboardPageCode;
+use periph::key_matrix::{DebouncerEagerPerKey, IntoKeyMatrixInputPinsWithSamePort, KeyMatrix, KeyState};
 
 #[allow(unused_imports)]
 use panic_itm as _;
@@ -18,7 +21,7 @@ use cortex_m_rt::entry;
 use stm32f4xx_hal::{dwt::DwtExt, otg_fs::USB, pac, prelude::*, rcc::RccExt};
 use synopsys_usb_otg::UsbBus;
 use usb_device::{device::{StringDescriptors, UsbDeviceBuilder, UsbVidPid}, LangID};
-use usbd_hid::{descriptor::{KeyboardReport, SerializedDescriptor}, hid_class::{HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidProtocolMode, HidSubClass, ProtocolModeConfig}};
+use usbd_hid::{descriptor::{KeyboardReport, SerializedDescriptor}, hid_class::{HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidProtocolMode, HidSubClass, ProtocolModeConfig}, UsbError};
 
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 
@@ -57,12 +60,15 @@ fn main0() -> ! {
         gpioa.pa2.into_pull_down_input(),
         gpioa.pa3.into_pull_down_input(),
         gpioa.pa4.into_pull_down_input(),
-    ).into_key_matrix_input_pins_with_same_port(), (gpioa.pa5.into_push_pull_output(), gpioa.pa6.into_push_pull_output(), gpioa.pa7.into_push_pull_output(), gpiob.pb0.into_push_pull_output()), debouncer);
+    ).into_input_pins_with_same_port(), (gpioa.pa5.into_push_pull_output(), gpioa.pa6.into_push_pull_output(), gpioa.pa7.into_push_pull_output(), gpiob.pb0.into_push_pull_output()), debouncer);
 
 
-    loop {
-        matrix.scan_matrix();
-    }
+    let layout = [
+        KeyboardPageCode::One, KeyboardPageCode::Two, KeyboardPageCode::Three, KeyboardPageCode::Four,
+        KeyboardPageCode::Q, KeyboardPageCode::W, KeyboardPageCode::E, KeyboardPageCode::R,
+        KeyboardPageCode::A, KeyboardPageCode::S, KeyboardPageCode::D, KeyboardPageCode::F,
+        KeyboardPageCode::Z, KeyboardPageCode::X, KeyboardPageCode::C, KeyboardPageCode::V,
+    ];
 
     let usb = USB {
         usb_global: dp.OTG_FS_GLOBAL,
@@ -100,6 +106,7 @@ fn main0() -> ! {
         .build();
 
 
+    let mut delay = Delay::new(cortex.SYST, 96_000_000);
 
     loop {
         if usb_dev.poll(&mut [&mut kbd_hid]) {
@@ -109,5 +116,25 @@ fn main0() -> ! {
             }
 
         }
+
+        matrix.scan_matrix();
+
+
+        let mut report = KeyboardReport::default();
+
+        let mut next_index = 0;
+        'out: for col in 0..4 {
+            for row in 0..4 {
+                if next_index >= 6 {
+                    break 'out
+                }
+
+                if matrix.get_key_state(row, col) == KeyState::Pressed {
+                    report.keycodes[next_index] = layout[row as usize * 4 + col as usize] as u8;
+                    next_index += 1;
+                }
+            }
+        }
+        kbd_hid.push_input(&report);
     }
 }
