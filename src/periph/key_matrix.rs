@@ -28,9 +28,17 @@ macro_rules! output_pins_impl {
 
             #[inline(always)]
             fn setup_pins(&mut self) {
-                // Sets the OSPEEDR registers to a reasonable value. With this, a STM32F411 with Vdd > 2.7V should take around 10 ns to raise a pin.
                 seq_macro::seq!(N in 0..$npins {
+                    // Sets the OSPEEDR registers to a reasonable
+                    // value. With this, a STM32F411 with Vdd > 2.7V
+                    // should take around 10 ns to raise a pin.
                     self.N.set_speed(stm32f4xx_hal::gpio::Speed::Medium);
+
+                    // Matrix scan uses active low for determining
+                    // whether a key is pressed. Therefore, output
+                    // pins will be high by default and pulled low
+                    // individually when matrix is scanned.
+                    self.N.set_state(stm32f4xx_hal::gpio::PinState::High);
                 });
             }
         }
@@ -73,10 +81,22 @@ macro_rules! input_pins_same_port_impl {
                   fn read_inputs(&self) -> Self::ReadResult {
                       SamePortReadResults {
                           read_value: unsafe {
-                              GpioX::<PORT>::idr_value()
+                              // SAFETY: SamePortReadResults will make
+                              // sure only owned pins that are known
+                              // to be in a input mode are read.
+
+                              // Negate the value, since a low signal
+                              // means that the input is on.
+                              !GpioX::<PORT>::idr_value()
                           },
                           _data: PhantomData
                       }
+                  }
+
+                  fn setup_pins(&mut self) {
+                      #(
+                          self.pins.i.set_internal_resistor(stm32f4xx_hal::gpio::Pull::Up);
+                      )*
                   }
               }
 
@@ -166,6 +186,7 @@ pub trait InputPins<const C: u8> {
     type ReadResult: InputRead;
 
     fn read_inputs(&self) -> Self::ReadResult;
+    fn setup_pins(&mut self);
 }
 
 /// Represents a type that holds a set of pins that can be turned on
@@ -284,7 +305,8 @@ pub struct KeyMatrix<const ROWS: u8, const COLS: u8, IN, OUT, D> where [(); ROWS
 }
 
 impl<const ROWS: u8, const COLS: u8, IN, OUT, D> KeyMatrix<ROWS, COLS, IN, OUT, D> where [(); ROWS as usize]:, IN: InputPins<ROWS>, OUT: OutputPins<COLS>, D: Debounce<ROWS, COLS>, Layout<ROWS>: MatrixLayout {
-    pub fn new(sysclk_freq: Hertz, input_pins: IN, mut output_pins: OUT, debouncer: D) -> Self {
+    pub fn new(sysclk_freq: Hertz, mut input_pins: IN, mut output_pins: OUT, debouncer: D) -> Self {
+        input_pins.setup_pins();
         output_pins.setup_pins();
 
         Self {
@@ -310,7 +332,7 @@ impl<const ROWS: u8, const COLS: u8, IN, OUT, D> KeyMatrix<ROWS, COLS, IN, OUT, 
         let current_millis = ((DWT::cycle_count() as u64) * 1000 / self.sysclk_freq.raw() as u64) as u32;
 
         for col in 0..COLS {
-            self.output_pins.set_state(col, PinState::High);
+            self.output_pins.set_state(col, PinState::Low);
             fence(Ordering::SeqCst);
             unsafe {
                 // Wait a couple of cycles to let the gpio pin
@@ -325,7 +347,7 @@ impl<const ROWS: u8, const COLS: u8, IN, OUT, D> KeyMatrix<ROWS, COLS, IN, OUT, 
 
             let inputs: IN::ReadResult = self.input_pins.read_inputs();
             fence(Ordering::SeqCst);
-            self.output_pins.set_state(col, PinState::Low);
+            self.output_pins.set_state(col, PinState::High);
 
             // This section should be already enough to give some time to the column pin to go low.
             for row in 0..ROWS {

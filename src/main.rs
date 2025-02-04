@@ -56,11 +56,12 @@ fn main0() -> ! {
 
     let debouncer = DebouncerEagerPerKey::<4, 4, 50>::new();
     let mut matrix: KeyMatrix<4, 4, _, _, _> = KeyMatrix::new(clocks.sysclk(), (
-        gpioa.pa1.into_pull_down_input(),
-        gpioa.pa2.into_pull_down_input(),
-        gpioa.pa3.into_pull_down_input(),
-        gpioa.pa4.into_pull_down_input(),
+        gpioa.pa1.into_input(),
+        gpioa.pa2.into_input(),
+        gpioa.pa3.into_input(),
+        gpioa.pa4.into_input(),
     ).into_input_pins_with_same_port(), (gpioa.pa5.into_push_pull_output(), gpioa.pa6.into_push_pull_output(), gpioa.pa7.into_push_pull_output(), gpiob.pb0.into_push_pull_output()), debouncer);
+
 
 
     let layout = [
