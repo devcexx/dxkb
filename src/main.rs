@@ -1,17 +1,21 @@
 #![no_std]
 #![no_main]
 #![allow(incomplete_features)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![deny(rustdoc::bare_urls)]
 #![feature(generic_const_exprs)] // I'm sorry, I just want to do some basic math with const types.
 
+mod hid;
+mod keyboard;
 mod periph;
 mod util;
-mod keyboard;
-mod hid;
 
 use core::ptr::addr_of_mut;
 
 use hid::KeyboardPageCode;
-use periph::key_matrix::{ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, KeyState};
+use periph::key_matrix::{
+    ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, KeyState,
+};
 
 #[allow(unused_imports)]
 use panic_itm as _;
@@ -19,8 +23,16 @@ use panic_itm as _;
 use cortex_m_rt::entry;
 use stm32f4xx_hal::{otg_fs::USB, pac, prelude::*, rcc::RccExt};
 use synopsys_usb_otg::UsbBus;
-use usb_device::{device::{StringDescriptors, UsbDeviceBuilder, UsbVidPid}, LangID};
-use usbd_hid::{descriptor::{KeyboardReport, SerializedDescriptor}, hid_class::{HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig}};
+use usb_device::{
+    device::{StringDescriptors, UsbDeviceBuilder, UsbVidPid},
+    LangID,
+};
+use usbd_hid::{
+    descriptor::{KeyboardReport, SerializedDescriptor},
+    hid_class::{
+        HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig,
+    },
+};
 
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 
@@ -56,30 +68,26 @@ fn main0() -> ! {
     const ROWS: u8 = 4;
     const COLS: u8 = 4;
 
-    let debouncer =  DebouncerEagerPerKey::<ROWS, COLS, 50>::new();
+    let debouncer = DebouncerEagerPerKey::<ROWS, COLS, 50>::new();
     let rows = (
         gpioa.pa1.into_input(),
         gpioa.pa2.into_input(),
         gpioa.pa3.into_input(),
         gpioa.pa4.into_input(),
-    ).into_input_pins_with_same_port();
+    )
+        .into_input_pins_with_same_port();
 
     let cols = (
         gpioa.pa5.into_push_pull_output(),
         gpioa.pa6.into_push_pull_output(),
         gpioa.pa7.into_push_pull_output(),
-        gpiob.pb0.into_push_pull_output()
+        gpiob.pb0.into_push_pull_output(),
     );
 
-    let mut matrix: KeyMatrix<ROWS, COLS, _, _, ColumnScan, _> = KeyMatrix::new(
-        clocks.sysclk(),
-        rows,
-        cols,
-        debouncer
-    );
+    let mut matrix: KeyMatrix<ROWS, COLS, _, _, ColumnScan, _> =
+        KeyMatrix::new(clocks.sysclk(), rows, cols, debouncer);
 
-
-
+    #[rustfmt::skip]
     let layout = [
         KeyboardPageCode::One, KeyboardPageCode::Two, KeyboardPageCode::Three, KeyboardPageCode::Four,
         KeyboardPageCode::Q, KeyboardPageCode::W, KeyboardPageCode::E, KeyboardPageCode::R,
@@ -103,11 +111,16 @@ fn main0() -> ! {
     // keyboards. However, usbd-hid is not providing support for this
     // right now. Shall I try to support it?
 
-    let mut kbd_hid = HIDClass::new_ep_in_with_settings(&bus_allocator, KeyboardReport::desc(), 1, HidClassSettings {
-        subclass: HidSubClass::NoSubClass,
-        protocol: HidProtocol::Keyboard,
-        config: ProtocolModeConfig::DefaultBehavior,
-        locale: HidCountryCode::Spanish }
+    let mut kbd_hid = HIDClass::new_ep_in_with_settings(
+        &bus_allocator,
+        KeyboardReport::desc(),
+        1,
+        HidClassSettings {
+            subclass: HidSubClass::NoSubClass,
+            protocol: HidProtocol::Keyboard,
+            config: ProtocolModeConfig::DefaultBehavior,
+            locale: HidCountryCode::Spanish,
+        },
     );
 
     let mut usb_dev = UsbDeviceBuilder::new(&bus_allocator, UsbVidPid(0x16c0, 0x27db))
@@ -128,11 +141,9 @@ fn main0() -> ! {
             if let Ok(_report) = kbd_hid.pull_raw_report(&mut report_buf) {
                 dev_info!("Received report!");
             }
-
         }
 
         matrix.scan_matrix();
-
 
         let mut report = KeyboardReport::default();
 
@@ -140,7 +151,7 @@ fn main0() -> ! {
         'out: for col in 0..4 {
             for row in 0..4 {
                 if next_index >= 6 {
-                    break 'out
+                    break 'out;
                 }
 
                 if matrix.get_key_state(row, col) == KeyState::Pressed {

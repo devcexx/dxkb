@@ -294,7 +294,7 @@ pub enum KeyboardPageCode {
     /// Keypad number 5
     Keypad5 = 0x5D,
 
-        /// Keypad number 6 and right arrow key
+    /// Keypad number 6 and right arrow key
     Keypad6 = 0x5E,
 
     /// Keypad number 7 and home key
@@ -657,16 +657,15 @@ pub enum KeyboardPageCode {
 
     /// Keypad hexadecimal
     KeypadHexadecimal = 0xDD,
-
     /*
-E0 Keyboard LeftControl DV 58 ✓ ✓ ✓ 4/101/104
-E1 Keyboard LeftShift DV 44 ✓ ✓ ✓ 4/101/104
-E2 Keyboard LeftAlt DV 60 ✓ ✓ ✓ 4/101/104
-E3 Keyboard Left GUI11,33 DV 127 ✓ ✓ ✓ 104
-E4 Keyboard RightControl DV 64 ✓ ✓ ✓ 101/104
-87
-Usage ID Usage Name Usage Type AT-101 PC-AT Mac Unix Boot
-E5 Keyboard RightShift DV 57 ✓ ✓ ✓ 4/101/104
-E6 Keyboard RightAlt DV 62 ✓ ✓ ✓ 101/104
-E7 Keyboard Right GUI11,34*/
+    E0 Keyboard LeftControl DV 58 ✓ ✓ ✓ 4/101/104
+    E1 Keyboard LeftShift DV 44 ✓ ✓ ✓ 4/101/104
+    E2 Keyboard LeftAlt DV 60 ✓ ✓ ✓ 4/101/104
+    E3 Keyboard Left GUI11,33 DV 127 ✓ ✓ ✓ 104
+    E4 Keyboard RightControl DV 64 ✓ ✓ ✓ 101/104
+    87
+    Usage ID Usage Name Usage Type AT-101 PC-AT Mac Unix Boot
+    E5 Keyboard RightShift DV 57 ✓ ✓ ✓ 4/101/104
+    E6 Keyboard RightAlt DV 62 ✓ ✓ ✓ 101/104
+    E7 Keyboard Right GUI11,34*/
 }
