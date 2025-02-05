@@ -12,7 +12,7 @@ use core::ptr::addr_of_mut;
 
 use cortex_m::delay::Delay;
 use hid::KeyboardPageCode;
-use periph::key_matrix::{DebouncerEagerPerKey, IntoKeyMatrixInputPinsWithSamePort, KeyMatrix, KeyState};
+use periph::key_matrix::{ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, KeyState, RowScan};
 
 #[allow(unused_imports)]
 use panic_itm as _;
@@ -54,13 +54,30 @@ fn main0() -> ! {
     }
     dev_info!("Device startup");
 
-    let debouncer = DebouncerEagerPerKey::<4, 4, 50>::new();
-    let mut matrix: KeyMatrix<4, 4, _, _, _> = KeyMatrix::new(clocks.sysclk(), (
+    const ROWS: u8 = 4;
+    const COLS: u8 = 4;
+
+    let debouncer =  DebouncerEagerPerKey::<ROWS, COLS, 50>::new();
+    let rows = (
         gpioa.pa1.into_input(),
         gpioa.pa2.into_input(),
         gpioa.pa3.into_input(),
         gpioa.pa4.into_input(),
-    ).into_input_pins_with_same_port(), (gpioa.pa5.into_push_pull_output(), gpioa.pa6.into_push_pull_output(), gpioa.pa7.into_push_pull_output(), gpiob.pb0.into_push_pull_output()), debouncer);
+    ).into_input_pins_with_same_port();
+
+    let cols = (
+        gpioa.pa5.into_push_pull_output(),
+        gpioa.pa6.into_push_pull_output(),
+        gpioa.pa7.into_push_pull_output(),
+        gpiob.pb0.into_push_pull_output()
+    );
+
+    let mut matrix: KeyMatrix<ROWS, COLS, _, _, ColumnScan, _> = KeyMatrix::new(
+        clocks.sysclk(),
+        rows,
+        cols,
+        debouncer
+    );
 
 
 

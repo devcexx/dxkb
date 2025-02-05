@@ -1,8 +1,6 @@
 use core::{arch::asm, marker::PhantomData, sync::atomic::{fence, Ordering}};
 
-use log::info;
-use seq_macro::seq;
-use stm32f4xx_hal::{gpio::{Input, Output, Pin, PinState, PushPull}, hal::digital::{InputPin, OutputPin}, pac::GPIOA, time::Hertz};
+use stm32f4xx_hal::{gpio::{Input, Output, Pin, PinState, PushPull}, time::Hertz};
 use cortex_m::peripheral::DWT;
 
 use crate::dev_info;
@@ -10,6 +8,14 @@ use crate::dev_info;
 use super::gpio::{GpioPort, GpioX};
 macro_rules! output_pins_impl {
     (@ $npins:literal, $($port_const:ident $pin_const:ident)*, $($pin_lit:literal)*) => {
+        impl <$(const $port_const: char, const $pin_const: u8),*> Pins for (
+            $(
+                 Pin<$port_const, $pin_const, Output<PushPull>>
+            ),*
+        ) {
+            const COUNT: u8 = $npins;
+        }
+
         impl <$(const $port_const: char, const $pin_const: u8),*> OutputPins<$npins> for (
             $(
                  Pin<$port_const, $pin_const, Output<PushPull>>
@@ -57,7 +63,7 @@ macro_rules! into_pins_with_same_port_impl {
     ($($npins:literal),*) => {
         $(
            seq_macro::seq!(i in 0..$npins {
-               impl<const PORT: char, #(const N~i: u8,)*> IntoKeyMatrixInputPinsWithSamePort for (#(Pin<PORT, N~i, Input>,)*) {
+               impl<const PORT: char, #(const N~i: u8,)*> IntoInputPinsWithSamePort for (#(Pin<PORT, N~i, Input>,)*) {
                    type Output = PinsWithSamePort<(#(Pin<PORT, N~i, Input>,)*)>;
 
                    fn into_input_pins_with_same_port(self) -> Self::Output {
@@ -75,6 +81,10 @@ macro_rules! input_pins_same_port_impl {
     ($($npins:literal),*) => {
         $(
           seq_macro::seq!(i in 0..$npins {
+              impl<const PORT: char, #(const N~i: u8,)*> Pins for PinsWithSamePort<(#(Pin<PORT, N~i, Input>,)*)> {
+                  const COUNT: u8 = $npins;
+              }
+
               impl<const PORT: char, #(const N~i: u8,)*> InputPins<$npins> for PinsWithSamePort<(#(Pin<PORT, N~i, Input>,)*)> where GpioX<PORT>: GpioPort, SamePortReadResults<Self>: InputRead {
                   type ReadResult = SamePortReadResults<Self>;
 
@@ -120,7 +130,7 @@ macro_rules! input_pins_same_port_impl {
 // Implement [`OutputPins`] for different number of pins.
 output_pins_impl!(2, 3, 4);
 
-// Implement [`IntoKeyMatrixInputPinsWithSamePort`] for different
+// Implement [`IntoInputPinsWithSamePort`] for different
 // number of pins. This allows converting a tuple of pins into [`PinsWithSamePort<T>`],
 // so that all pins can be read at once from a single register.
 into_pins_with_same_port_impl!(2, 3, 4);
@@ -139,14 +149,14 @@ pub struct SamePortReadResults<T> {
 /// Represents a type that can be converted into a type (that conforms
 /// to [`InputPins`]), that can read input values from different pins
 /// from a single GPIO register.
-pub trait IntoKeyMatrixInputPinsWithSamePort {
+pub trait IntoInputPinsWithSamePort {
     type Output;
 
     fn into_input_pins_with_same_port(self) -> Self::Output;
 }
 
 /// Represents a set of input ports that are located in the same GPIO
-/// port. This struct implements the [`KeyMatrixInputPins`] trait,
+/// port. This struct implements the [`InputPins`] trait,
 /// reading all the input values in all the pins in the same cycle!
 pub struct PinsWithSamePort<T> {
     pins: T
@@ -180,9 +190,13 @@ pub trait InputRead {
     fn is_on(&self, row: u8) -> bool;
 }
 
+pub trait Pins {
+    const COUNT: u8;
+}
+
 /// Represents a type that holds a set of input pins whose value can
-/// be read all at once. These pins represents the rows of the matrix.
-pub trait InputPins<const C: u8> {
+/// be read all at once.
+pub trait InputPins<const C: u8>: Pins {
     type ReadResult: InputRead;
 
     fn read_inputs(&self) -> Self::ReadResult;
@@ -190,9 +204,8 @@ pub trait InputPins<const C: u8> {
 }
 
 /// Represents a type that holds a set of pins that can be turned on
-/// or off individually for scanning a key matrix. These pins
-/// represents the columns of the matrix.
-pub trait OutputPins<const C: u8> {
+/// or off individually for scanning a key matrix.
+pub trait OutputPins<const C: u8>: Pins {
     fn set_state(&mut self, col: u8, value: PinState);
     fn setup_pins(&mut self);
 }
@@ -296,23 +309,103 @@ impl<const ROWS: u8, const COLS: u8, const DEBOUNCE_MILLIS: u8> Debounce<ROWS, C
     }
 }
 
-pub struct KeyMatrix<const ROWS: u8, const COLS: u8, IN, OUT, D> where [(); ROWS as usize]:, Layout<ROWS>: MatrixLayout {
+pub trait MatrixScan<const ROWS: u8, const COLS: u8, RowPins, ColPins> where Layout<ROWS>: MatrixLayout {
+    type InPins: Pins;
+    type OutPins;
+
+    fn translate_pins(rows: RowPins, cols: ColPins) -> (Self::InPins, Self::OutPins);
+    fn translate_indexes(input_pin_index: u8, output_pin_index: u8) -> (u8, u8);
+}
+
+/// A type of matrix scan in which the column pins are individually
+/// selected, and the row pins are read at once. This should be the
+/// selected matrix scan type if your board setup has diodes connected
+/// from the rows to the columns.
+pub struct ColumnScan {}
+
+impl<const ROWS: u8, const COLS: u8, RowPins, ColPins> MatrixScan<ROWS, COLS, RowPins, ColPins> for ColumnScan where Layout<ROWS>: MatrixLayout, RowPins: InputPins<ROWS>, ColPins: OutputPins<COLS> {
+    type InPins = RowPins;
+    type OutPins = ColPins;
+
+    fn translate_pins(rows: RowPins, cols: ColPins) -> (Self::InPins, Self::OutPins) {
+        (rows, cols)
+    }
+
+    fn translate_indexes(input_pin_index: u8, output_pin_index: u8) -> (u8, u8) {
+        (input_pin_index, output_pin_index)
+    }
+}
+
+/// A type of matrix scan in which the row pins are individually
+/// selected, and the column pins are read at once. This should be the
+/// selected matrix scan type if your board setup has diodes connected
+/// from the columns to the rows.
+pub struct RowScan {}
+
+impl<const ROWS: u8, const COLS: u8, RowPins, ColPins> MatrixScan<ROWS, COLS, RowPins, ColPins> for RowScan where Layout<ROWS>: MatrixLayout, RowPins: OutputPins<ROWS>, ColPins: InputPins<COLS> {
+    type InPins = ColPins;
+    type OutPins = RowPins;
+
+    fn translate_pins(rows: RowPins, cols: ColPins) -> (Self::InPins, Self::OutPins) {
+        (cols, rows)
+    }
+
+    fn translate_indexes(input_pin_index: u8, output_pin_index: u8) -> (u8, u8) {
+        (output_pin_index, input_pin_index)
+    }
+}
+
+/// A key matrix, constructed from the pins that forms the rows and
+/// the columns of the matrix. In this matrix, a key is considered
+/// pressed when it is active low.  More information about how key
+/// matrices work:
+/// https://pcbheaven.com/wikipages/How_Key_Matrices_Works/
+
+/// The definition of the key matrix is completed with the following
+/// generics:
+///  - `ROWS`: The number of rows in the matrix.
+///  - `COLS`: The number of columns in the matrix.
+///  - `RowPins`: The type that represents the row pins of the matrix.
+///     They're generally represented as a tuple of pins.
+///     Pin direction (input or output) depends on the matrix scan type S.
+///  - `ColPins`: The type that represents the column pins of the matrix.
+///    They're generally represented as a tuple of pins.
+///    Pin direction (input or output) depends on the matrix scan type S.
+///  - `S`: The type that indicates how the matrix will be scanned.
+///    It should be set to either one of the following types:
+///    - [`ColumnScan`]: The columns of the matrix are selected one by one,
+///      and the rows are read all at once. In this mode, RowPins needs to
+///      hold input pins, and ColPins needs to hold output pins.
+///    - [`RowScan`]: The rows of the matrix are selected one by one,
+///      and the columns are read all at once. In this mode, RowPins needs to
+///      hold output pins, and ColPins needs to hold input pins.
+
+pub struct KeyMatrix<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D>
+where [(); ROWS as usize]:, S: MatrixScan<ROWS, COLS, RowPins, ColPins>, Layout<ROWS>: MatrixLayout {
     buf: [<Layout<ROWS> as MatrixLayout>::RowDataType; ROWS as usize],
-    input_pins: IN,
-    output_pins: OUT,
+    input_pins: S::InPins,
+    output_pins: S::OutPins,
     debouncer: D,
     sysclk_freq: Hertz
 }
 
-impl<const ROWS: u8, const COLS: u8, IN, OUT, D> KeyMatrix<ROWS, COLS, IN, OUT, D> where [(); ROWS as usize]:, IN: InputPins<ROWS>, OUT: OutputPins<COLS>, D: Debounce<ROWS, COLS>, Layout<ROWS>: MatrixLayout {
-    pub fn new(sysclk_freq: Hertz, mut input_pins: IN, mut output_pins: OUT, debouncer: D) -> Self {
-        input_pins.setup_pins();
-        output_pins.setup_pins();
+impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D> KeyMatrix<ROWS, COLS, RowPins, ColPins, S, D>
+where [(); ROWS as usize]:,
+      S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
+      D: Debounce<ROWS, COLS>,
+      Layout<ROWS>: MatrixLayout,
+      S::InPins: InputPins<{S::InPins::COUNT}>,
+      S::OutPins: OutputPins<{S::OutPins::COUNT}> {
+
+    pub fn new(sysclk_freq: Hertz, rows: RowPins, cols: ColPins, debouncer: D) -> Self {
+        let (mut in_pins, mut out_pins) = S::translate_pins(rows, cols);
+        in_pins.setup_pins();
+        out_pins.setup_pins();
 
         Self {
             buf: [Default::default(); ROWS as usize],
-            input_pins,
-            output_pins,
+            input_pins: in_pins,
+            output_pins: out_pins,
             debouncer,
             sysclk_freq
         }
@@ -331,8 +424,8 @@ impl<const ROWS: u8, const COLS: u8, IN, OUT, D> KeyMatrix<ROWS, COLS, IN, OUT, 
     pub fn scan_matrix(&mut self) {
         let current_millis = ((DWT::cycle_count() as u64) * 1000 / self.sysclk_freq.raw() as u64) as u32;
 
-        for col in 0..COLS {
-            self.output_pins.set_state(col, PinState::Low);
+        for output_pin_index in 0..S::OutPins::COUNT {
+            self.output_pins.set_state(output_pin_index, PinState::Low);
             fence(Ordering::SeqCst);
             unsafe {
                 // Wait a couple of cycles to let the gpio pin
@@ -345,18 +438,21 @@ impl<const ROWS: u8, const COLS: u8, IN, OUT, D> KeyMatrix<ROWS, COLS, IN, OUT, 
                 );
             }
 
-            let inputs: IN::ReadResult = self.input_pins.read_inputs();
+            let inputs = self.input_pins.read_inputs();
             fence(Ordering::SeqCst);
-            self.output_pins.set_state(col, PinState::High);
+            self.output_pins.set_state(output_pin_index, PinState::High);
 
             // This section should be already enough to give some time to the column pin to go low.
-            for row in 0..ROWS {
-                let new_state = KeyState::from_bool(inputs.is_on(row));
+            for input_pin_index in 0..S::InPins::COUNT {
+                let new_state = KeyState::from_bool(inputs.is_on(input_pin_index));
+
+                let (row, col) = S::translate_indexes(input_pin_index, output_pin_index);
                 let prev_state = self.get_key_state(row, col);
+
                 let effective_state = self.debouncer.debounce(row, col, current_millis, prev_state, new_state);
                 if effective_state != prev_state {
                     self.set_key_state(row, col, effective_state);
-                    info!("{:?} ({}; {}) ({} ms)", effective_state, row, col, current_millis);
+                    dev_info!("{:?} ({}; {}) ({} ms)", effective_state, row, col, current_millis);
                 }
             }
         }
