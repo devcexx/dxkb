@@ -10,18 +10,17 @@ mod hid;
 
 use core::ptr::addr_of_mut;
 
-use cortex_m::delay::Delay;
 use hid::KeyboardPageCode;
-use periph::key_matrix::{ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, KeyState, RowScan};
+use periph::key_matrix::{ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, KeyState};
 
 #[allow(unused_imports)]
 use panic_itm as _;
 
 use cortex_m_rt::entry;
-use stm32f4xx_hal::{dwt::DwtExt, otg_fs::USB, pac, prelude::*, rcc::RccExt};
+use stm32f4xx_hal::{otg_fs::USB, pac, prelude::*, rcc::RccExt};
 use synopsys_usb_otg::UsbBus;
 use usb_device::{device::{StringDescriptors, UsbDeviceBuilder, UsbVidPid}, LangID};
-use usbd_hid::{descriptor::{KeyboardReport, SerializedDescriptor}, hid_class::{HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidProtocolMode, HidSubClass, ProtocolModeConfig}, UsbError};
+use usbd_hid::{descriptor::{KeyboardReport, SerializedDescriptor}, hid_class::{HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig}};
 
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 
@@ -123,13 +122,10 @@ fn main0() -> ! {
         .unwrap()
         .build();
 
-
-    let mut delay = Delay::new(cortex.SYST, 96_000_000);
-
     loop {
         if usb_dev.poll(&mut [&mut kbd_hid]) {
             let mut report_buf = [0u8; 64];
-            if let Ok(report) = kbd_hid.pull_raw_report(&mut report_buf) {
+            if let Ok(_report) = kbd_hid.pull_raw_report(&mut report_buf) {
                 dev_info!("Received report!");
             }
 
@@ -153,6 +149,6 @@ fn main0() -> ! {
                 }
             }
         }
-        kbd_hid.push_input(&report);
+        let _ = kbd_hid.push_input(&report);
     }
 }
