@@ -22,8 +22,7 @@ use periph::key_matrix::{
 use panic_itm as _;
 
 use cortex_m_rt::entry;
-use stm32f4::stm32f411::DWT;
-use stm32f4xx_hal::{otg_fs::USB, pac::{self, OTG_FS_DEVICE}, prelude::*, rcc::RccExt};
+use stm32f4xx_hal::{otg_fs::USB, pac::{self, DWT, OTG_FS_DEVICE}, prelude::*, rcc::RccExt};
 use synopsys_usb_otg::UsbBus;
 use usb_device::{
     device::{StringDescriptors, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
