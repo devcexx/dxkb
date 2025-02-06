@@ -180,11 +180,11 @@ fn main0() -> ! {
                     });
                 }
             } else {
-                suspend_led.set_low();
+                suspend_led.set_high();
             }
 
         } else {
-            suspend_led.set_low();
+            suspend_led.set_high();
             let mut report = KeyboardReport::default();
 
             let mut next_index = 0;
