@@ -12,6 +12,7 @@ mod util;
 
 use core::ptr::addr_of_mut;
 
+use cortex_m::delay::Delay;
 use hid::KeyboardPageCode;
 use periph::key_matrix::{
     ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, KeyState,
@@ -21,10 +22,11 @@ use periph::key_matrix::{
 use panic_itm as _;
 
 use cortex_m_rt::entry;
-use stm32f4xx_hal::{otg_fs::USB, pac, prelude::*, rcc::RccExt};
+use stm32f4::stm32f411::DWT;
+use stm32f4xx_hal::{otg_fs::USB, pac::{self, OTG_FS_DEVICE}, prelude::*, rcc::RccExt};
 use synopsys_usb_otg::UsbBus;
 use usb_device::{
-    device::{StringDescriptors, UsbDeviceBuilder, UsbVidPid},
+    device::{StringDescriptors, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
     LangID,
 };
 use usbd_hid::{
@@ -58,6 +60,9 @@ fn main0() -> ! {
 
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
+    let gpioc = dp.GPIOC.split();
+
+    let mut suspend_led = gpioc.pc13.into_push_pull_output();
 
     #[cfg(feature = "dev-log")]
     {
@@ -74,8 +79,7 @@ fn main0() -> ! {
         gpioa.pa2.into_input(),
         gpioa.pa3.into_input(),
         gpioa.pa4.into_input(),
-    )
-        .into_input_pins_with_same_port();
+    ).into_input_pins_with_same_port();
 
     let cols = (
         gpioa.pa5.into_push_pull_output(),
@@ -133,33 +137,73 @@ fn main0() -> ! {
             .manufacturer("Dobetito")
             .product("DXKB Lily58L")])
         .unwrap()
+        .supports_remote_wakeup(true)
         .build();
 
+    let mut prev_usb_status: Option<UsbDeviceState> = None;
+    let mut delay = Delay::new(cortex.SYST, clocks.hclk().raw());
+    let mut last_led_change_ticks = DWT::cycle_count();
     loop {
+        let cur_usb_status = Some(usb_dev.state());
+        if prev_usb_status != cur_usb_status {
+            dev_info!("USB device status changed to {:?}; Remote wakeup? {}", usb_dev.state(), usb_dev.remote_wakeup_enabled());
+            prev_usb_status = Some(usb_dev.state());
+        }
+
         if usb_dev.poll(&mut [&mut kbd_hid]) {
             let mut report_buf = [0u8; 64];
             if let Ok(_report) = kbd_hid.pull_raw_report(&mut report_buf) {
-                dev_info!("Received report!");
+                dev_info!("Received report! {}", usb_dev.remote_wakeup_enabled());
             }
         }
 
-        matrix.scan_matrix();
-
-        let mut report = KeyboardReport::default();
-
-        let mut next_index = 0;
-        'out: for col in 0..4 {
-            for row in 0..4 {
-                if next_index >= 6 {
-                    break 'out;
+        let changed = matrix.scan_matrix();
+        if usb_dev.state() == UsbDeviceState::Suspend {
+            if usb_dev.remote_wakeup_enabled() {
+                // Just a led animation for testing
+                let elapsed_ms = (DWT::cycle_count() - last_led_change_ticks) as u64 * 1000 / clocks.hclk().raw() as u64;
+                if elapsed_ms > 300 {
+                    last_led_change_ticks = DWT::cycle_count();
+                    suspend_led.toggle();
                 }
 
-                if matrix.get_key_state(row, col) == KeyState::Pressed {
-                    report.keycodes[next_index] = layout[row as usize * 4 + col as usize] as u8;
-                    next_index += 1;
+                if changed {
+                    suspend_led.set_high();
+                    let dv = unsafe {
+                        OTG_FS_DEVICE::steal()
+                    };
+                    dv.dctl().modify(|_, w| {
+                        w.rwusig().set_bit()
+                    });
+                    delay.delay_ms(5); // According to datasheet, bit needs to be turned on between 1 and 15 ms.
+                    dv.dctl().modify(|_, w| {
+                        w.rwusig().clear_bit()
+                    });
+                }
+            } else {
+                suspend_led.set_low();
+            }
+
+        } else {
+            suspend_led.set_low();
+            let mut report = KeyboardReport::default();
+
+            let mut next_index = 0;
+            'out: for col in 0..4 {
+                for row in 0..4 {
+                    if next_index >= 6 {
+                        break 'out;
+                    }
+
+                    if matrix.get_key_state(row, col) == KeyState::Pressed {
+                        report.keycodes[next_index] = layout[row as usize * 4 + col as usize] as u8;
+                        next_index += 1;
+                    }
                 }
             }
+
+
+            let _ = kbd_hid.push_input(&report);
         }
-        let _ = kbd_hid.push_input(&report);
     }
 }

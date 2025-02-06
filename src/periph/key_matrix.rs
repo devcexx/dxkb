@@ -519,9 +519,13 @@ where
         RowLayout::<ROWS>::set_state(&mut self.buf[row as usize], col, state);
     }
 
-    pub fn scan_matrix(&mut self) {
+
+    /// Scans the current status of the key matrix, returning true if
+    /// something has changed from the past scan.
+    pub fn scan_matrix(&mut self) -> bool {
         let current_millis =
             ((DWT::cycle_count() as u64) * 1000 / self.sysclk_freq.raw() as u64) as u32;
+        let mut has_changed = false;
 
         for output_pin_index in 0..S::OutPins::COUNT {
             self.output_pins.set_state(output_pin_index, PinState::Low);
@@ -549,6 +553,7 @@ where
                     self.debouncer
                         .debounce(row, col, current_millis, prev_state, new_state);
                 if effective_state != prev_state {
+                    has_changed = true;
                     self.set_key_state(row, col, effective_state);
                     dev_info!(
                         "{:?} ({}; {}) ({} ms)",
@@ -560,5 +565,7 @@ where
                 }
             }
         }
+
+        has_changed
     }
 }

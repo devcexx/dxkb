@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["stm32f411"]
+default = ["stm32f411", "dev-log"]
 # By default any logging is completely disabled, regardless of the log
 # level, for preventing unnecessary conditionals and debug strings in
 # the final artifact. When this feature is enabled, logging will be
