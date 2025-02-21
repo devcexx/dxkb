@@ -1,3 +1,12 @@
+// This DXKB version is experimental and subject to deep changes in
+// the future. This version should include the bare minimum for
+// running a split keyboard, including USB support, USB remote wake
+// up, key matrix, layout definition, and a communication port between
+// the two parts of the keyboard.
+
+//TODO Test in the future to integrate with RTIC for better handling
+//interrupts? https://github.com/rtic-rs/rtic
+
 #![no_std]
 #![no_main]
 #![allow(incomplete_features)]
@@ -9,7 +18,10 @@ mod hid;
 mod keyboard;
 mod periph;
 mod util;
+mod split_bus;
 
+use core::arch::asm;
+use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 
 use cortex_m::delay::Delay;
@@ -22,7 +34,12 @@ use periph::key_matrix::{
 use panic_itm as _;
 
 use cortex_m_rt::entry;
-use stm32f4xx_hal::{otg_fs::USB, pac::{self, DWT, OTG_FS_DEVICE}, prelude::*, rcc::RccExt};
+use periph::uart_dma_rb::{DmaRingBuffer, UartDmaRb};
+use split_bus::SplitBus;
+use stm32f4xx_hal::dma::{Stream5, Stream7};
+use stm32f4xx_hal::gpio::{Output, Pin};
+use stm32f4xx_hal::pac::{Interrupt, DMA2};
+use stm32f4xx_hal::{dma::StreamsTuple, interrupt, otg_fs::USB, pac::{self, DWT, NVIC, OTG_FS_DEVICE}, prelude::*, rcc::RccExt, serial::{config::{DmaConfig, StopBits}, Config, Serial}};
 use synopsys_usb_otg::UsbBus;
 use usb_device::{
     device::{StringDescriptors, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
@@ -35,7 +52,14 @@ use usbd_hid::{
     },
 };
 
+type UartBus = UartDmaRb<pac::USART1, Stream7<DMA2>, Stream5<DMA2>, 4, 4, 256, 128>;
+
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
+static mut SPLIT_BUS_BUF: DmaRingBuffer<256, 128> = DmaRingBuffer::new();
+static mut SPLIT_BUS: MaybeUninit<SplitBus<u8, UartBus, 32>> = MaybeUninit::uninit();
+static mut INTR_PIN: Pin<'B', 8, Output> = unsafe {
+    core::mem::zeroed()
+};
 
 #[entry]
 fn main() -> ! {
@@ -72,6 +96,8 @@ fn main0() -> ! {
     const ROWS: u8 = 4;
     const COLS: u8 = 4;
 
+    let mut delay = Delay::new(cortex.SYST, clocks.hclk().raw());
+
     let debouncer = DebouncerEagerPerKey::<ROWS, COLS, 50>::new();
     let rows = (
         gpioa.pa1.into_input(),
@@ -107,6 +133,54 @@ fn main0() -> ! {
         hclk: clocks.hclk(),
     };
 
+    let rx = gpiob.pb7.into_alternate();
+    let tx = gpiob.pb6.into_alternate();
+
+    let dma2 = StreamsTuple::new(dp.DMA2);
+    let dma2_2 = StreamsTuple::new(unsafe {
+        DMA2::steal()
+    });
+
+    //SplitBus::init(dp.USART2, todo!(), dma2.7, dma2.5, &clocks);
+    // Worked with 2995200 baud
+    // let usart1 = Serial::new(
+    //     dp.USART1,
+    //     (tx, rx),
+    //     Config::default()
+    //         .baudrate(9600.bps())
+    //         .parity_none()
+    //         .stopbits(StopBits::STOP1)
+    //         .dma(DmaConfig::TxRx),
+    //     &clocks).unwrap();
+
+    unsafe {
+//        NVIC::unmask(Interrupt::DMA2_STREAM7);
+//        NVIC::unmask(Interrupt::DMA2_STREAM4);
+    }
+
+
+
+
+
+    // loop {
+    //     let mut last_ndr = 999;
+    //     unsafe {
+    //         usart_dma.write_dma(b"HOLA", None).unwrap();
+    //     }
+    //     while !dma2_2.7.is_transfer_complete() {
+    //         let cur_ndr = dma2_2.7.number_of_transfers();
+    //         if last_ndr != cur_ndr {
+    //             dev_info!("N: {}", cur_ndr);
+    //             last_ndr = cur_ndr;
+    //         }
+    //     }
+    //     suspend_led.toggle();
+    //     delay.delay_ms(1000);
+    //     usart_dma.handle_dma_interrupt();
+    //     usart_dma.handle_dma_interrupt();
+    // }
+
+
     let bus_allocator = UsbBus::new(usb, unsafe { addr_of_mut!(EP_MEMORY).as_mut().unwrap() });
 
     // TODO NKRO support
@@ -114,9 +188,12 @@ fn main0() -> ! {
     // keyboards. However, usbd-hid is not providing support for this
     // right now. Shall I try to support it?
 
+    // TODO Make USART NVIC interrupts a priority in which they cannot be preempted by any other interrupt.
+
+    const NZXT_HUE2_DESCRIPTOR: [u8; 34] = [0x06, 0x72, 0xFF, 0x09, 0xA1, 0xA1, 0x01, 0x09, 0x10, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x40, 0x81, 0x02, 0x09, 0x11, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x40, 0x91, 0x02, 0xC0];
     let mut kbd_hid = HIDClass::new_ep_in_with_settings(
         &bus_allocator,
-        KeyboardReport::desc(),
+        &NZXT_HUE2_DESCRIPTOR,
         1,
         HidClassSettings {
             subclass: HidSubClass::NoSubClass,
@@ -129,7 +206,7 @@ fn main0() -> ! {
     let mut usb_dev = UsbDeviceBuilder::new(&bus_allocator, UsbVidPid(0x16c0, 0x27db))
         .device_class(0x3) // HID Device
         .device_sub_class(HidSubClass::NoSubClass as u8) // No subclass
-        .device_protocol(HidProtocol::Keyboard as u8)
+        .device_protocol(HidProtocol::Generic as u8)
         .usb_rev(usb_device::device::UsbRev::Usb200)
         .strings(&[StringDescriptors::new(LangID::ES)
             .serial_number("0")
@@ -140,9 +217,32 @@ fn main0() -> ! {
         .build();
 
     let mut prev_usb_status: Option<UsbDeviceState> = None;
-    let mut delay = Delay::new(cortex.SYST, clocks.hclk().raw());
+
     let mut last_led_change_ticks = DWT::cycle_count();
+
+
+
+    let split_bus = unsafe {
+        INTR_PIN = gpiob.pb8.into_push_pull_output();
+        INTR_PIN.set_high();
+
+        let sb = SPLIT_BUS.write(SplitBus::new(
+            UartDmaRb::init(dp.USART1, (tx, rx), dma2.7, dma2.5, &mut SPLIT_BUS_BUF, &clocks)
+        ));
+
+        NVIC::unmask(Interrupt::USART1);
+        sb
+    };
     loop {
+
+        let mut count = 0;
+        split_bus.poll(|frame| {
+            count+=1;
+
+            dev_info!("Received frame: {:?}", frame);
+        });
+
+
         let cur_usb_status = Some(usb_dev.state());
         if prev_usb_status != cur_usb_status {
             dev_info!("USB device status changed to {:?}; Remote wakeup? {}", usb_dev.state(), usb_dev.remote_wakeup_enabled());
@@ -152,7 +252,8 @@ fn main0() -> ! {
         if usb_dev.poll(&mut [&mut kbd_hid]) {
             let mut report_buf = [0u8; 64];
             if let Ok(_report) = kbd_hid.pull_raw_report(&mut report_buf) {
-                dev_info!("Received report! {}", usb_dev.remote_wakeup_enabled());
+
+                let _ = kbd_hid.push_raw_input(&report_buf).unwrap();
             }
         }
 
@@ -201,8 +302,55 @@ fn main0() -> ! {
                 }
             }
 
-
-            let _ = kbd_hid.push_input(&report);
+           // let _ = kbd_hid.push_input(&report);
         }
     }
+}
+
+#[interrupt]
+fn USART1() {
+    unsafe {
+        INTR_PIN.set_low();
+        asm!(
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+        );
+        INTR_PIN.set_high();
+    }
+    let split_bus = unsafe {
+        SPLIT_BUS.assume_init_mut()
+    };
+
+    split_bus.bus().handle_usart_intr();
+    unsafe {
+        INTR_PIN.set_low();
+        asm!(
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+            "and r1,r1",
+        );
+        INTR_PIN.set_high();
+    }
+
 }

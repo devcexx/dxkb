@@ -15,10 +15,14 @@ stm32f411 = ["stm32f4xx-hal/stm32f411"]
 [dependencies]
 cortex-m = "0.7.7"
 cortex-m-rt = "0.7.5"
+crc = "3.2.1"
 itm_logger = "0.1.2"
 log = "0.4.25"
 panic-itm = "0.4.2"
+ringbuffer = { version = "0.15.0", default-features = false }
 seq-macro = "0.3.5"
+serde = { version = "1.0.217", default-features = false, features = ["derive"] }
+ssmarshal = { version = "1.0.0", default-features = false }
 stm32f4xx-hal = { version = "0.22.1", features = ["usb_fs"] }
 synopsys-usb-otg = { version = "0.4.0", features = ["cortex-m", "fs"] }
 usb-device = "0.3.2"
