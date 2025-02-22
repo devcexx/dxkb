@@ -23,7 +23,7 @@ use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 
 use cortex_m::delay::Delay;
-use dxkb_common::clock::Clock;
+use dxkb_common::time::Clock;
 use dxkb_common::dev_info;
 use hid::KeyboardPageCode;
 use dxkb_peripheral::key_matrix::{
@@ -39,14 +39,14 @@ use dxkb_split_link::SplitBus;
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::{Output, Pin};
 use stm32f4xx_hal::pac::{Interrupt, DMA2};
-use stm32f4xx_hal::{dma::StreamsTuple, interrupt, otg_fs::USB, pac::{self, DWT, NVIC, OTG_FS_DEVICE}, prelude::*, rcc::RccExt, serial::{config::{DmaConfig, StopBits}, Config, Serial}};
+use stm32f4xx_hal::{dma::StreamsTuple, interrupt, otg_fs::USB, pac::{self, DWT, NVIC, OTG_FS_DEVICE}, prelude::*, rcc::RccExt};
 use synopsys_usb_otg::UsbBus;
 use usb_device::{
     device::{StringDescriptors, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
     LangID,
 };
 use usbd_hid::{
-    descriptor::{KeyboardReport, SerializedDescriptor},
+    descriptor::KeyboardReport,
     hid_class::{
         HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig,
     },
@@ -102,6 +102,8 @@ fn main0() -> ! {
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
     let gpioc = dp.GPIOC.split();
+
+
 
     let mut suspend_led = gpioc.pc13.into_push_pull_output();
 
