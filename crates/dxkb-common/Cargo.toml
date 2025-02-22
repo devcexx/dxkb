@@ -1,0 +1,12 @@
+[package]
+name = "dxkb-common"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+dev-log = []
+
+
+
+[dependencies]
+log = { workspace = true }

@@ -1,0 +1,32 @@
+[package]
+name = "dxkb-main"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["stm32f411"]
+stm32f411 = ["stm32f4xx-hal/stm32f411", "dxkb-peripheral/stm32f411"]
+
+[dependencies]
+dxkb-common = { path = "../dxkb-common" }
+dxkb-peripheral = { path = "../dxkb-peripheral" }
+dxkb-split-link = { path = "../dxkb-split-link" }
+
+cortex-m = { workspace = true }
+cortex-m-rt = { workspace = true }
+itm_logger = { workspace = true }
+log = { workspace = true }
+panic-itm = { workspace = true }
+ringbuffer = { workspace = true, default-features = false }
+seq-macro = { workspace = true }
+serde = { workspace = true, default-features = false, features = ["derive"] }
+ssmarshal = { workspace = true, default-features = false }
+stm32f4xx-hal = { workspace = true, features = ["usb_fs"] }
+synopsys-usb-otg = { workspace = true, features = ["cortex-m", "fs"] }
+usb-device = { workspace = true }
+usbd-hid = { workspace = true }
+vcell = { workspace = true }
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true

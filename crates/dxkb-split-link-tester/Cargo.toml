@@ -1,0 +1,12 @@
+[package]
+name = "dxkb-split-link-tester"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dxkb-split-link = { path = "../dxkb-split-link" }
+dxkb-common = { path = "../dxkb-common" }
+clap = { version = "4.5.30", features = ["derive"] }
+serialport = "4.7.0"
+env_logger = "0.11.6"
+nix = { version = "0.29.0", features = ["time"] }

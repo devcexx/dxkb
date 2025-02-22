@@ -1,18 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/dxkb-common", "crates/dxkb-peripheral", "crates/dxkb-split-link", "crates/dxkb-main", "crates/dxkb-split-link-tester"]
+
 [package]
 name = "dxkb"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
-[features]
-default = ["stm32f411", "dev-log"]
+#[features]
+#default = ["stm32f411", "dev-log"]
 # By default any logging is completely disabled, regardless of the log
 # level, for preventing unnecessary conditionals and debug strings in
 # the final artifact. When this feature is enabled, logging will be
 # enabled and it will be printed to the ITM.
-dev-log = []
-stm32f411 = ["stm32f4xx-hal/stm32f411"]
+#dev-log = []
+#stm32f411 = ["stm32f4xx-hal/stm32f411"]
 
-[dependencies]
+[workspace.dependencies]
 cortex-m = "0.7.7"
 cortex-m-rt = "0.7.5"
 crc = "3.2.1"
@@ -29,6 +33,6 @@ usb-device = "0.3.2"
 usbd-hid = "0.8.2"
 vcell = "0.1.3"
 
-[profile.release-with-debug]
-inherits = "release"
-debug = true
+#[profile.release-with-debug]
+#inherits = "release"
+#debug = true
