@@ -2,11 +2,6 @@
 resolver = "2"
 members = ["crates/dxkb-common", "crates/dxkb-peripheral", "crates/dxkb-split-link", "crates/dxkb-main", "crates/dxkb-split-link-tester"]
 
-[package]
-name = "dxkb"
-version = "0.1.0"
-edition = "2024"
-
 #[features]
 #default = ["stm32f411", "dev-log"]
 # By default any logging is completely disabled, regardless of the log

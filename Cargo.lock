@@ -356,10 +356,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dxkb"
-version = "0.1.0"
-
-[[package]]
 name = "dxkb-common"
 version = "0.1.0"
 dependencies = [
