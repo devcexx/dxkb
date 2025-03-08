@@ -10,7 +10,7 @@ use stm32f4xx_hal::{
     time::Hertz,
 };
 
-use dxkb_common::dev_info;
+use dxkb_common::{dev_info, dev_trace};
 
 use super::gpio::{GpioPort, GpioX};
 macro_rules! output_pins_impl {
@@ -352,7 +352,7 @@ where
                 return prev_state;
             } else {
                 // The debounce time have already passed. Mark it as such, and continue.
-                dev_info!(
+                dev_trace!(
                     "Debounce time over for {}; {} ({} ms). Because {} - {} = {}",
                     row,
                     col,
@@ -368,7 +368,7 @@ where
         if prev_state != last_read_state {
             // If there has been any change, report the change, and
             // store the time when it happened.
-            dev_info!(
+            dev_trace!(
                 "Debounce time set in {} ms after {:?}",
                 current_millis,
                 last_read_state

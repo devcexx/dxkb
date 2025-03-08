@@ -4,9 +4,16 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-dev-log = []
-
-
+__dev_log_enable_level_trace = []
+__dev_log_enable_level_debug = []
+__dev_log_enable_level_info = []
+__dev_log_enable_level_warn = []
+__dev_log_enable_level_error = []
+dev-log-level-error = ["__dev_log_enable_level_error"]
+dev-log-level-warn =  ["__dev_log_enable_level_error", "__dev_log_enable_level_warn"]
+dev-log-level-info =  ["__dev_log_enable_level_error", "__dev_log_enable_level_warn", "__dev_log_enable_level_info"]
+dev-log-level-debug = ["__dev_log_enable_level_error", "__dev_log_enable_level_warn", "__dev_log_enable_level_info", "__dev_log_enable_level_debug"]
+dev-log-level-trace = ["__dev_log_enable_level_error", "__dev_log_enable_level_warn", "__dev_log_enable_level_info", "__dev_log_enable_level_debug", "__dev_log_enable_level_trace"]
 
 [dependencies]
 log = { workspace = true }

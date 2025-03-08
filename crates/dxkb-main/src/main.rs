@@ -35,7 +35,7 @@ use panic_itm as _;
 
 use cortex_m_rt::entry;
 use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, UartDmaRb};
-use dxkb_split_link::SplitBus;
+use dxkb_split_link::{DefaultSplitLinkTimings, SplitBus};
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::{Output, Pin};
 use stm32f4xx_hal::pac::{Interrupt, DMA2};
@@ -56,7 +56,7 @@ type UartBus = UartDmaRb<pac::USART1, Stream7<DMA2>, Stream5<DMA2>, 4, 4, 256, 1
 
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 static mut SPLIT_BUS_BUF: DmaRingBuffer<256, 128> = DmaRingBuffer::new();
-static mut SPLIT_BUS: MaybeUninit<SplitBus<u8, UartBus, DWTClock,  32>> = MaybeUninit::uninit();
+static mut SPLIT_BUS: MaybeUninit<SplitBus<u8, DefaultSplitLinkTimings, UartBus, DWTClock,  32>> = MaybeUninit::uninit();
 static mut INTR_PIN: Pin<'B', 8, Output> = unsafe {
     core::mem::zeroed()
 };
