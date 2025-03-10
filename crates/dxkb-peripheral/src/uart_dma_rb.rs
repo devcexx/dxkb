@@ -6,6 +6,7 @@ use core::cell::UnsafeCell;
 use core::fmt::Debug;
 use core::mem;
 use cortex_m::interrupt::Mutex;
+use dxkb_common::dev_trace;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use stm32f4xx_hal::dma::traits::DMASet;
 use stm32f4xx_hal::dma::MemoryToPeripheral;
@@ -73,7 +74,7 @@ impl<const BUF_LEN: usize, const MAX_FRAME_COUNT: usize> DmaRingBufferWriteSide<
         if last_frame_off >= begin_off {
             last_frame_off - begin_off
         } else {
-            BUF_LEN - 1 - begin_off + last_frame_off
+            BUF_LEN - begin_off + last_frame_off
         }
     }
 
@@ -169,7 +170,7 @@ impl<const BUF_LEN: usize, const MAX_FRAME_COUNT: usize> DmaRingBuffer<BUF_LEN, 
                 }).ok_or(BusPollError::WouldBlock)?;
 
             if section.len as usize > buf.len() {
-                dev_warn!("Discarded frame that is greater than the recv buffer");
+                dev_warn!("Discarded frame that is greater than the rx buffer ({} > {})", section.len, buf.len());
                 // In this case, we drop the frame since it is
                 // unlikely that the caller will be able to handle it
                 // in a next call.
@@ -204,6 +205,7 @@ pub struct UartDmaRb<
         tx_stream: TxStream,
         rx_stream: RxStream,
         rx_buf: &'static mut DmaRingBuffer<MAX_RX_BUF, MAX_RB_FRAG_COUNT>,
+        tx_buf: &'static mut [u8; MAX_RX_BUF] // TODO Create a MAX_TX_BUF
     }
 
 impl<
@@ -237,6 +239,7 @@ Usart: DMASet<RxStream, RX_CH, PeripheralToMemory>,
          ),
          tx_stream: TxStream,
          rx_stream: RxStream,
+         tx_buf: &'static mut [u8; MAX_RX_BUF],
          rx_buf: &'static mut DmaRingBuffer<MAX_RX_BUF, MAX_RB_FRAG_COUNT>,
          clocks: &Clocks
      ) -> Self {
@@ -248,15 +251,17 @@ Usart: DMASet<RxStream, RX_CH, PeripheralToMemory>,
              unsafe { mem::transmute_copy(&usart) },
              pins,
              Config::default()
-                 .baudrate(2000000.bps())
+                 .baudrate(9600.bps())
                  .parity_none()
                  .stopbits(StopBits::STOP1)
                  .wordlength_8()
                  .dma(DmaConfig::TxRx), clocks).unwrap();
 
          serial.listen_only(Event::Idle);
+
          let (tx, rx) = serial.split();
          let rx_peri_addr: u32 = rx.address();
+         let tx_peri_addr: u32 = tx.address();
 
          // Enable error interrupt generation
          usart.cr3().modify(|_, w| w.eie().enabled());
@@ -266,8 +271,9 @@ Usart: DMASet<RxStream, RX_CH, PeripheralToMemory>,
              tx_stream,
              rx_stream,
              rx_buf,
+             tx_buf,
          };
-
+         ret.config_tx_stream(tx_peri_addr);
          ret.init_rx_dma_xfer(rx_peri_addr);
          dev_info!("DMA RX enabled on USART line");
          ret
@@ -301,6 +307,31 @@ Usart: DMASet<RxStream, RX_CH, PeripheralToMemory>,
          unsafe {
              self.rx_stream.enable();
          }
+     }
+
+     fn config_tx_stream(&mut self, peri_addr: u32) {
+         unsafe {
+             self.tx_stream.disable();
+         }
+
+         self.tx_stream.set_channel(<ChannelX::<TX_CH> as Channel>::VALUE);
+         self.tx_stream.set_direction(MemoryToPeripheral::direction());
+         self.tx_stream.set_peripheral_address(peri_addr);
+         self.tx_stream.clear_all_flags();
+         self.tx_stream.set_priority(dma::config::Priority::High);
+         unsafe {
+             self.tx_stream.set_memory_size(dma::DmaDataSize::Byte);
+             self.tx_stream.set_peripheral_size(dma::DmaDataSize::Byte);
+         }
+         self.tx_stream.set_memory_increment(true);
+         self.tx_stream.set_peripheral_increment(false);
+
+         self.tx_stream.set_double_buffer(false);
+         self.tx_stream.set_circular_mode(false);
+         self.tx_stream.set_fifo_threshold(FifoThreshold::QuarterFull);
+         self.tx_stream.set_fifo_enable(false);
+         self.tx_stream.set_memory_burst(BurstMode::NoBurst);
+         self.tx_stream.set_peripheral_burst(BurstMode::NoBurst);
      }
 
 
@@ -365,9 +396,22 @@ Serial<Usart, u8>: Listen<Event=Event> + ReadFlags<Flag=Flag> + ClearFlags<Flag=
 Usart: DMASet<TxStream, TX_CH, MemoryToPeripheral>,
 Usart: DMASet<RxStream, RX_CH, PeripheralToMemory>,
  {
-    fn transfer(&mut self, buf: &[u8]) -> Result<(), BusTransferError> {
-        todo!()
-    }
+     fn transfer(&mut self, buf: &[u8]) -> Result<(), BusTransferError> {
+         if self.tx_stream.is_enabled() {
+             return Err(BusTransferError::WouldBlock);
+         }
+
+         self.tx_stream.clear_all_flags();
+         // TODO Handle buffer overflow error
+
+         self.tx_stream.set_memory_address(self.tx_buf.as_ptr() as u32);
+         self.tx_stream.set_number_of_transfers(buf.len() as u16);
+         self.tx_buf[0..buf.len()].copy_from_slice(buf);
+         unsafe {
+             self.tx_stream.enable();
+         }
+         Ok(())
+     }
 
     fn is_tx_busy(&self) -> bool {
         self.tx_stream.is_enabled()
