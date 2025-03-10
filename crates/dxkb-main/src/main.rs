@@ -112,6 +112,11 @@ fn main() -> ! {
 fn main0() -> ! {
     let dp = pac::Peripherals::take().unwrap();
     let mut cortex = cortex_m::Peripherals::take().unwrap();
+
+    // TODO DWT DCB are DWT are debug extensions, not sure that this
+    // should be used in "production". I probably should do a Clock
+    // implementation based on a 32-bit clock.
+    cortex.DCB.enable_trace();
     cortex.DWT.enable_cycle_counter();
     let rcc = dp.RCC.constrain();
 
