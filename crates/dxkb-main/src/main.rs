@@ -19,11 +19,14 @@ mod hid;
 mod keyboard;
 
 use core::arch::asm;
+use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
+use core::time::Duration;
 
 use cortex_m::delay::Delay;
-use dxkb_common::time::Clock;
+use dxkb_common::bus::BusWrite;
+use dxkb_common::time::{Clock, TimeDiff};
 use dxkb_common::dev_info;
 use hid::KeyboardPageCode;
 use dxkb_peripheral::key_matrix::{
@@ -35,7 +38,7 @@ use panic_itm as _;
 
 use cortex_m_rt::entry;
 use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, UartDmaRb};
-use dxkb_split_link::{DefaultSplitLinkTimings, SplitBus};
+use dxkb_split_link::{DefaultSplitLinkTimings, SplitBus, TestingTimings};
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::{Output, Pin};
 use stm32f4xx_hal::pac::{Interrupt, DMA2};
@@ -56,28 +59,50 @@ type UartBus = UartDmaRb<pac::USART1, Stream7<DMA2>, Stream5<DMA2>, 4, 4, 256, 1
 
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 static mut SPLIT_BUS_BUF: DmaRingBuffer<256, 128> = DmaRingBuffer::new();
-static mut SPLIT_BUS: MaybeUninit<SplitBus<u8, DefaultSplitLinkTimings, UartBus, DWTClock,  32>> = MaybeUninit::uninit();
+static mut DMA_UART_TX_BUF: [u8; 256] = [0u8; 256];
+static mut SPLIT_BUS: MaybeUninit<SplitBus<u8, TestingTimings, UartBus, DWTClock,  32>> = MaybeUninit::uninit();
 static mut INTR_PIN: Pin<'B', 8, Output> = unsafe {
     core::mem::zeroed()
 };
 
 
-struct DWTClock {
+pub struct DWTClock {
     clock_freq: u32
 }
 
-impl Clock for DWTClock {
-    #[inline(always)]
-    fn current_cycle(&self) -> u32 {
-        DWT::cycle_count()
-    }
+#[derive(Clone, Copy)]
+pub struct DWTInstant {
+    cycles: u32,
+}
 
-    #[inline(always)]
-    fn current_nanos(&self) -> u64 {
-        DWT::cycle_count() as u64 * 1_000_000_000 / self.clock_freq as u64
+impl DWTClock {
+    fn cycles_to_nanos(&self, cycles: u32) -> u64 {
+        cycles as u64 * 1_000_000_000u64 / self.clock_freq as u64
     }
 }
 
+impl Clock for DWTClock {
+    type TInstant = DWTInstant;
+
+    fn current_instant(&self) -> Self::TInstant {
+        DWTInstant {
+            cycles: DWT::cycle_count(),
+        }
+    }
+
+    fn diff(&self, newer: Self::TInstant, older: Self::TInstant) -> TimeDiff {
+        let d = newer.cycles.wrapping_sub(older.cycles) as i32;
+        if d >= 0 {
+            TimeDiff::Forward(Duration::from_nanos(self.cycles_to_nanos(d as u32)))
+        } else {
+            TimeDiff::Backward(Duration::from_nanos(self.cycles_to_nanos((-1 * d) as u32)))
+        }
+    }
+
+    fn nanos(&self, instant: Self::TInstant) -> u64 {
+        self.cycles_to_nanos(instant.cycles)
+    }
+}
 
 #[entry]
 fn main() -> ! {
@@ -107,16 +132,14 @@ fn main0() -> ! {
 
     let mut suspend_led = gpioc.pc13.into_push_pull_output();
 
-    #[cfg(feature = "dev-log")]
-    {
-        itm_logger::init_with_level(log::Level::Info).unwrap();
-    }
+
+    itm_logger::init_with_level(log::Level::Trace).unwrap();
     dev_info!("Device startup");
 
     const ROWS: u8 = 4;
     const COLS: u8 = 4;
 
-    let mut delay = Delay::new(cortex.SYST, clocks.hclk().raw());
+    let mut delay = Delay::new(cortex.SYST, 96_000_000);
 
     let debouncer = DebouncerEagerPerKey::<ROWS, COLS, 50>::new();
     let rows = (
@@ -240,14 +263,13 @@ fn main0() -> ! {
 
     let mut last_led_change_ticks = DWT::cycle_count();
 
-
+    let mut uart_dma = UartDmaRb::init(dp.USART1, (tx, rx), dma2.7, dma2.5, unsafe{ &mut DMA_UART_TX_BUF }, unsafe { &mut SPLIT_BUS_BUF }, &clocks);
 
     let split_bus = unsafe {
         INTR_PIN = gpiob.pb8.into_push_pull_output();
         INTR_PIN.set_high();
 
-        let sb = SPLIT_BUS.write(SplitBus::new(
-            UartDmaRb::init(dp.USART1, (tx, rx), dma2.7, dma2.5, &mut SPLIT_BUS_BUF, &clocks),
+        let sb = SPLIT_BUS.write(SplitBus::new(uart_dma,
             DWTClock {
                 clock_freq: clocks.sysclk().raw(),
             }

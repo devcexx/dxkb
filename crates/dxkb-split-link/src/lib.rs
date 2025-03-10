@@ -49,7 +49,7 @@ use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::time::Duration;
 use crc::Table;
-use dxkb_common::time::{Clock, Instant};
+use dxkb_common::time::Clock;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -85,6 +85,16 @@ impl SplitLinkTimings for DefaultSplitLinkTimings {
     const MAX_SYNC_ACK_WAIT_TIME: Duration = Duration::from_millis(1000);
     const MSG_REPLAY_DELAY_TIME: Duration = Duration::from_millis(500);
 }
+
+
+pub struct TestingTimings {}
+impl SplitLinkTimings for TestingTimings {
+    const MAX_LINK_IDLE_TIME: Duration = Duration::from_secs(10);
+    const LINK_IDLE_PROBE_INTERVAL_TIME: Duration = Duration::from_secs(3);
+    const MAX_SYNC_ACK_WAIT_TIME: Duration = Duration::from_secs(5);
+    const MSG_REPLAY_DELAY_TIME: Duration = Duration::from_millis(200);
+}
+
 
 const SPLIT_BUS_CRC: crc::Crc<u8, Table<1>> = crc::Crc::<u8, Table<1>>::new(&crc::CRC_8_SMBUS);
 const FRAME_PRELUDE_BYTE: u8 = 0x99;
@@ -132,6 +142,7 @@ pub enum FrameDecodeError {
     SerdeError(ssmarshal::Error)
 }
 
+#[derive(Debug)]
 pub enum TransferError {
     BufferOverflow
 }
@@ -182,16 +193,16 @@ pub struct SplitBus<Msg, Ts: SplitLinkTimings, B: BusWrite + BusRead, CS: Clock,
     bus: B,
     clock: CS,
     link_status: LinkStatus,
-    last_link_status_change_time: Instant,
-    last_recv_frame_time: Instant,
-    last_sent_frame_time: Instant,
+    last_link_status_change_time: CS::TInstant,
+    last_recv_frame_time: CS::TInstant,
+    last_sent_frame_time: CS::TInstant,
 
     /// If not empty, indicates that we haven't received yet an ACK
     /// from the peer indicating that it has received the user message
     /// stored in the head of the `user_tx_queue`. The time value
     /// inside the optional contains the last time the message was
     /// re-sent.
-    user_msg_pending_ack_sent_time: Option<Instant>,
+    user_msg_pending_ack_sent_time: Option<CS::TInstant>,
 
     /// The sequence number that will use the outgoing frames to the
     /// peer.
@@ -227,14 +238,16 @@ impl<Msg> MaxFrameLength<Msg> where Msg: Sized {
 // TODO Refactor code so that the code is based on the status of the link (like a state machine with actions on each transition and all that). (E.g move the code to an impl LinkStatus).
 impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B: BusWrite + BusRead, CS: Clock, const TX_QUEUE_LEN: usize> SplitBus<Msg, Ts, B, CS, TX_QUEUE_LEN> where [(); MaxFrameLength::<Msg>::MAX_FRAME_LENGTH]:, [(); MaxFrameLength::<NoMsg>::MAX_FRAME_LENGTH]: {
 
-    pub const fn new(bus: B, clock: CS) -> Self {
+    pub fn new(bus: B, clock: CS) -> Self {
+        let cur = clock.current_instant();
+
         Self {
             bus,
             clock,
             link_status: LinkStatus::Down,
-            last_link_status_change_time: Instant::new(0),
-            last_recv_frame_time: Instant::new(0),
-            last_sent_frame_time: Instant::new(0),
+            last_link_status_change_time: cur,
+            last_recv_frame_time: cur,
+            last_sent_frame_time: cur,
             user_msg_pending_ack_sent_time: None,
             tx_seq: 0,
             rx_seq: 0,
@@ -308,8 +321,8 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
 
             if new_state == LinkStatus::Down {
                 // Reset the link status, clearing all the outgoing control and user messages.
-                self.last_recv_frame_time = Instant::default();
-                self.last_sent_frame_time = Instant::default();
+                self.last_recv_frame_time = self.clock.current_instant();
+                self.last_sent_frame_time = self.clock.current_instant();
                 self.user_msg_pending_ack_sent_time = None;
                 self.control_tx_queue.clear();
                 self.user_tx_queue.clear();
@@ -479,7 +492,7 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
         encoded_len + 2
     }
 
-    fn transfer_frame<M: Serialize + Debug>(bus: &mut B, clock: &CS, last_sent_frame_time: &mut Instant, frame: &FrameContentEnvelope<M>) -> Result<(), BusTransferError> where [(); MaxFrameLength::<M>::MAX_FRAME_LENGTH]: {
+    fn transfer_frame<M: Serialize + Debug>(bus: &mut B, clock: &CS, last_sent_frame_time: &mut CS::TInstant, frame: &FrameContentEnvelope<M>) -> Result<(), BusTransferError> where [(); MaxFrameLength::<M>::MAX_FRAME_LENGTH]: {
         let mut txbuf = [0u8; {MaxFrameLength::<M>::MAX_FRAME_LENGTH}];
         let len = Self::encode_frame(&mut txbuf, frame);
         let res = bus.transfer(&mut txbuf[0..len]);
@@ -526,21 +539,24 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
     }
 
     fn do_timed_actions(&mut self) {
-        if self.last_sent_frame_time.elapsed(&self.clock) >= Ts::LINK_IDLE_PROBE_INTERVAL_TIME {
+        if self.clock.elapsed_since(self.last_sent_frame_time) >= Ts::LINK_IDLE_PROBE_INTERVAL_TIME {
+            // TODO We need to do something about probes:
+            // - If we stop sending probes when we receive normal frames, we need to trigger link sync everytime we receive a valid frame.
+            // - Either that, or we keep sending link probes indefinitely. I prefer the first option just to save some bandwidth
             self.push_control_frame(FrameContentEnvelope::new(0, FrameContent::LinkProbe));
         }
 
-        if self.link_status == LinkStatus::Sync && self.last_link_status_change_time.elapsed(&self.clock) >= Ts::MAX_SYNC_ACK_WAIT_TIME {
+        if self.link_status == LinkStatus::Sync && self.clock.elapsed_since(self.last_link_status_change_time) >= Ts::MAX_SYNC_ACK_WAIT_TIME {
             dev_warn!("Couldn't receive a SyncACK frame in time. Giving up link synchronization");
             self.change_link_state(LinkStatus::Down);
         }
 
         if self.link_status == LinkStatus::Up {
-            if self.last_recv_frame_time.elapsed(&self.clock) >= Ts::MAX_LINK_IDLE_TIME {
+            if self.clock.elapsed_since(self.last_recv_frame_time) >= Ts::MAX_LINK_IDLE_TIME {
                 dev_warn!("Link has been idle for so long. Considering it down");
                 self.change_link_state(LinkStatus::Down);
             } else if let Some(last_replay_time) = self.user_msg_pending_ack_sent_time {
-                if !self.bus.is_tx_busy() && last_replay_time.elapsed(&self.clock) > Ts::MSG_REPLAY_DELAY_TIME {
+                if !self.bus.is_tx_busy() && self.clock.elapsed_since(last_replay_time) > Ts::MSG_REPLAY_DELAY_TIME {
                     dev_debug!("Re-sent user message for which no ACK has been received");
                     self.transfer_next_user_msg();
                 }

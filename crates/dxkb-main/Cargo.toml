@@ -8,7 +8,7 @@ default = ["stm32f411"]
 stm32f411 = ["stm32f4xx-hal/stm32f411", "dxkb-peripheral/stm32f411"]
 
 [dependencies]
-dxkb-common = { path = "../dxkb-common" }
+dxkb-common = { path = "../dxkb-common", features = ["dev-log-level-trace"] }
 dxkb-peripheral = { path = "../dxkb-peripheral" }
 dxkb-split-link = { path = "../dxkb-split-link" }
 

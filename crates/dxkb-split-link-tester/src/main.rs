@@ -6,24 +6,42 @@ mod logger;
 use std::{cell::RefCell, collections::LinkedList, io::{stdin, Cursor, ErrorKind, Read, Write}, os::fd::AsFd, path::Path, sync::{Arc, Mutex}, thread::{self, panicking}, time::{Duration}};
 
 use clap::Parser;
-use dxkb_common::{__log::{info, LevelFilter}, bus::{BusPollError, BusRead, BusWrite}, dev_debug, dev_error, dev_info, dev_trace, time::{Clock, Instant}};
-use dxkb_split_link::{LinkStatus, SplitBus, SplitLinkTimings};
+use dxkb_common::{__log::{info, LevelFilter}, bus::{BusPollError, BusRead, BusWrite}, dev_debug, dev_error, dev_info, dev_trace, time::{Clock, TimeDiff}};
+use dxkb_split_link::{DefaultSplitLinkTimings, LinkStatus, SplitBus, SplitLinkTimings};
 use flexi_logger::{colored_default_format, writers::LogWriter};
 use nix::{poll::{PollFd, PollFlags, PollTimeout}, sys::time::TimeSpec, time::{clock_gettime, clock_nanosleep, ClockId, ClockNanosleepFlags}};
 use rustyline::{DefaultEditor, ExternalPrinter};
 use serde::{Deserialize, Serialize};
 use serial2::{CharSize, FlowControl, Parity, SerialPort, Settings, StopBits};
 
+#[derive(Clone, Copy)]
+struct LinuxMonotonicClockInstant {
+    nanos: u64
+}
+
 #[derive(Clone)]
-struct LinuxMonoticClock {}
-impl Clock for LinuxMonoticClock {
-    fn current_cycle(&self) -> u32 {
-        0
+struct LinuxMonotonicClock {}
+impl Clock for LinuxMonotonicClock {
+    type TInstant = LinuxMonotonicClockInstant;
+
+    fn current_instant(&self) -> Self::TInstant {
+        let time = nix::time::clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap();
+
+        LinuxMonotonicClockInstant {
+            nanos: (time.tv_sec() * 1_000_000_000 + time.tv_nsec()) as u64
+        }
     }
 
-    fn current_nanos(&self) -> u64 {
-        let time = nix::time::clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap();
-        (time.tv_sec() * 1_000_000_000 + time.tv_nsec()) as u64
+    fn diff(&self, newer: Self::TInstant, older: Self::TInstant) -> dxkb_common::time::TimeDiff {
+        if newer.nanos >= older.nanos {
+            TimeDiff::Forward(Duration::from_nanos(newer.nanos - older.nanos))
+        } else {
+            TimeDiff::Backward(Duration::from_nanos(older.nanos - newer.nanos))
+        }
+    }
+
+    fn nanos(&self, instant: Self::TInstant) -> u64 {
+        instant.nanos
     }
 }
 
@@ -235,7 +253,7 @@ fn transfer_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut
     let mut xfer_completed = false;
     let mut last_link_state = LinkStatus::Down;
     let mut last_chunk_len: u8 = 1;
-    let mut last_transfer_status_msg: Instant = Instant::new(0);
+    let mut last_transfer_status_msg = (LinuxMonotonicClock{}).current_instant();
     let mut transferred_length = 0;
 
 
@@ -270,8 +288,8 @@ fn transfer_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut
                 if let Ok(_) = link.transfer(next_transfer.clone()) {
                     transferred_length += next_transfer.chunk_len as usize;
                     next_chunk = None;
-                    if last_transfer_status_msg.elapsed(&LinuxMonoticClock{}) > Duration::from_millis(500) {
-                        last_transfer_status_msg = LinuxMonoticClock{}.current_instant();
+                    if (LinuxMonotonicClock{}).elapsed_since(last_transfer_status_msg) > Duration::from_millis(500) {
+                        last_transfer_status_msg = LinuxMonotonicClock{}.current_instant();
                         dev_info!("Total transferred: {} / {}", transferred_length, total_length);
                     }
                 }
@@ -285,13 +303,14 @@ fn transfer_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut
 
 fn receive_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut SplitBus<TransferChunk, TestingTimings, B, CS, 256>) {
     let mut file = std::fs::File::create(file_path).unwrap();
-    let mut completed_time: Option<Instant> = None;
+    let mut completed_time: Option<CS::TInstant> = None;
 
     loop {
         link.poll(|m| {
             if completed_time.is_none() {
                 if m.chunk_len == 0 {
-                    completed_time = Some(LinuxMonoticClock{}.current_instant());
+                    todo!()
+//                    completed_time = Some(LinuxMonotonicClock{}.current_instant());
                 } else {
                     file.write(&m.chunk[0..m.chunk_len as usize]).unwrap();
                 }
@@ -301,16 +320,19 @@ fn receive_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut 
 
         if let Some(completed_time) = completed_time {
             // Wait a couple of seconds before finishing to let the lasts ACK to be sent.
-            if completed_time.elapsed(&LinuxMonoticClock{}) > Duration::from_secs(2) {
-                dev_info!("Transfer completed");
-                break;
-            }
+            // if completed_time.elapsed(&LinuxMonotonicClock{}) > Duration::from_secs(2) {
+            //     dev_info!("Transfer completed");
+            //     break;
+            // }
+
+            todo!()
 
         }
     }
 
     drop(file);
 }
+
 
 fn main() {
     //  main2();
@@ -363,36 +385,39 @@ fn main() {
         }
     });
 
-    let clock = LinuxMonoticClock {};
+    let clock = LinuxMonotonicClock {};
 
-//    let mut last_sent_message = clock.current_instant();
-
-
-    match args.transfer_mode {
-        TransferMode::SendSampleMessage => todo!(),
-        TransferMode::JustReceive => todo!(),
-        TransferMode::SendFile => {
-            let mut split_bus: SplitBus<TransferChunk, TestingTimings, _, _, 256> = SplitBus::new(serial_bus.clone(), clock.clone());
-            transfer_file(args.file.unwrap(), &mut split_bus);
-        },
-        TransferMode::ReceiveFile => {
-            let mut split_bus: SplitBus<TransferChunk, TestingTimings, _, _, 256> = SplitBus::new(serial_bus.clone(), clock.clone());
-            receive_file(args.file.unwrap(), &mut split_bus);
-        },
-    }
+    let mut last_sent_message = clock.current_instant();
 
 
-    // dev_info!("Start polling serial");
-    // loop {
-    //     split_bus.poll(|m| {
-    //         dev_info!("Received message: {}", String::from_utf8_lossy(m))
-    //     });
-
-    //     if is_sender && split_bus.link_status() == LinkStatus::Up && last_sent_message.elapsed(&clock) > Duration::from_millis(50) {
-    //         dev_info!("Sample message was sent");
-    //         split_bus.transfer(b"HELLO WORLD    !".clone());
-    //         last_sent_message = clock.current_instant();
-    //     }
-    //     thread::sleep(Duration::from_millis(1));
+    // match args.transfer_mode {
+    //     TransferMode::SendSampleMessage => todo!(),
+    //     TransferMode::JustReceive => todo!(),
+    //     TransferMode::SendFile => {
+    //         let mut split_bus: SplitBus<TransferChunk, TestingTimings, _, _, 256> = SplitBus::new(serial_bus.clone(), clock.clone());
+    //         transfer_file(args.file.unwrap(), &mut split_bus);
+    //     },
+    //     TransferMode::ReceiveFile => {
+    //         let mut split_bus: SplitBus<TransferChunk, TestingTimings, _, _, 256> = SplitBus::new(serial_bus.clone(), clock.clone());
+    //         receive_file(args.file.unwrap(), &mut split_bus);
+    //     },
     // }
+
+
+    let mut split_bus: SplitBus<u8, TestingTimings, _, _, 256> = SplitBus::new(serial_bus.clone(), clock.clone());
+    let mut next = 0;
+    dev_info!("Start polling serial");
+    loop {
+        split_bus.poll(|m| {
+            dev_info!("Received message: {}", *m)
+        });
+
+        if is_sender && split_bus.link_status() == LinkStatus::Up && clock.elapsed_since(last_sent_message) > Duration::from_millis(50) {
+            dev_info!("Sample message was sent");
+            split_bus.transfer(next).unwrap();
+            next += 1;
+            last_sent_message = clock.current_instant();
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
 }
