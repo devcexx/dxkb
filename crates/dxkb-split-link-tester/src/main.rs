@@ -3,14 +3,14 @@
 
 mod logger;
 
-use std::{cell::RefCell, collections::LinkedList, io::{stdin, Cursor, ErrorKind, Read, Write}, os::fd::AsFd, path::Path, sync::{Arc, Mutex}, thread::{self, panicking}, time::{Duration}};
+use std::{collections::LinkedList, io::{Cursor, ErrorKind, Read, Write}, os::fd::AsFd, path::Path, sync::{Arc, Mutex}, thread::{self}, time::{Duration}};
 
 use clap::Parser;
-use dxkb_common::{__log::{info, LevelFilter}, bus::{BusPollError, BusRead, BusWrite}, dev_debug, dev_error, dev_info, dev_trace, time::{Clock, TimeDiff}};
-use dxkb_split_link::{DefaultSplitLinkTimings, LinkStatus, SplitBus, SplitLinkTimings};
-use flexi_logger::{colored_default_format, writers::LogWriter};
+use dxkb_common::{__log::LevelFilter, bus::{BusPollError, BusRead, BusWrite}, dev_error, dev_info, dev_trace, time::{Clock, TimeDiff}};
+use dxkb_split_link::{LinkStatus, SplitBus, SplitLinkTimings};
+use flexi_logger::writers::LogWriter;
 use nix::{poll::{PollFd, PollFlags, PollTimeout}, sys::time::TimeSpec, time::{clock_gettime, clock_nanosleep, ClockId, ClockNanosleepFlags}};
-use rustyline::{DefaultEditor, ExternalPrinter};
+use rustyline::ExternalPrinter;
 use serde::{Deserialize, Serialize};
 use serial2::{CharSize, FlowControl, Parity, SerialPort, Settings, StopBits};
 
@@ -250,7 +250,7 @@ fn transfer_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut
     let total_length = original_contents.len();
     let mut contents = Cursor::new(original_contents);
     let mut next_chunk: Option<TransferChunk> = None;
-    let mut xfer_completed = false;
+    let xfer_completed = false;
     let mut last_link_state = LinkStatus::Down;
     let mut last_chunk_len: u8 = 1;
     let mut last_transfer_status_msg = (LinuxMonotonicClock{}).current_instant();
@@ -303,7 +303,7 @@ fn transfer_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut
 
 fn receive_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut SplitBus<TransferChunk, TestingTimings, B, CS, 256>) {
     let mut file = std::fs::File::create(file_path).unwrap();
-    let mut completed_time: Option<CS::TInstant> = None;
+    let completed_time: Option<CS::TInstant> = None;
 
     loop {
         link.poll(|m| {

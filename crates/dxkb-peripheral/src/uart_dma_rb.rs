@@ -12,7 +12,7 @@ use stm32f4xx_hal::dma::MemoryToPeripheral;
 use stm32f4xx_hal::Ptr;
 use stm32f4xx_hal::pac::usart1::RegisterBlock;
 use stm32f4xx_hal::serial::{CFlag, Flag, Instance, RxISR};
-use stm32f4xx_hal::{dma::{self, config::{BurstMode, FifoThreshold}, traits::{Channel, Direction, PeriAddress, Stream, StreamISR}, ChannelX, PeripheralToMemory, StreamX}, gpio::PushPull, rcc::Clocks, serial::{config::{DmaConfig, StopBits}, dma::{RxDMA, SerialDma, TxDMA}, Config, Event, Rx, RxListen, Serial, Tx}, time::U32Ext, ClearFlags, Listen, ReadFlags};
+use stm32f4xx_hal::{dma::{self, config::{BurstMode, FifoThreshold}, traits::{Channel, Direction, PeriAddress, Stream, StreamISR}, ChannelX, PeripheralToMemory}, gpio::PushPull, rcc::Clocks, serial::{config::{DmaConfig, StopBits}, Config, Event, Serial}, time::U32Ext, ClearFlags, Listen, ReadFlags};
 use dxkb_common::{dev_info, dev_warn, bus::{BusRead, BusPollError, BusWrite, BusTransferError}};
 
 /// Runs a interrupt-free code block, taking a mutable reference from

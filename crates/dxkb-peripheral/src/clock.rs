@@ -1,4 +1,4 @@
-use core::{sync::atomic::{fence, Ordering}, time::Duration};
+use core::time::Duration;
 
 use dxkb_common::{dev_info, time::{Clock, TimeDiff}};
 use enumflags2::BitFlags;

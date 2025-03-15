@@ -19,16 +19,12 @@ mod hid;
 mod keyboard;
 
 use core::arch::asm;
-use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
-use core::time::Duration;
 
 use cortex_m::delay::Delay;
-use dxkb_common::bus::BusWrite;
-use dxkb_common::time::{Clock, TimeDiff};
 use dxkb_common::dev_info;
-use dxkb_peripheral::clock::{DWTClock, TIMClock};
+use dxkb_peripheral::clock::DWTClock;
 use hid::KeyboardPageCode;
 use dxkb_peripheral::key_matrix::{
     ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, KeyState,
@@ -223,7 +219,7 @@ fn main0() -> ! {
 
     let mut last_led_change_ticks = DWT::cycle_count();
 
-    let mut uart_dma = UartDmaRb::init(dp.USART1, (tx, rx), dma2.7, dma2.5, unsafe{ &mut DMA_UART_TX_BUF }, unsafe { &mut SPLIT_BUS_BUF }, &clocks);
+    let uart_dma = UartDmaRb::init(dp.USART1, (tx, rx), dma2.7, dma2.5, unsafe{ &mut DMA_UART_TX_BUF }, unsafe { &mut SPLIT_BUS_BUF }, &clocks);
 
     let clock = DWTClock::new(&clocks, &mut cortex.DCB, &mut cortex.DWT);
 

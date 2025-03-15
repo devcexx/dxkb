@@ -44,7 +44,6 @@ Where:
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
-use core::convert::Infallible;
 use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::time::Duration;
@@ -54,7 +53,7 @@ use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use dxkb_common::bus::{BusPollError, BusRead, BusTransferError, BusWrite};
-use dxkb_common::{dev_debug, dev_error, dev_info, dev_trace, dev_warn};
+use dxkb_common::{dev_debug, dev_info, dev_trace, dev_warn};
 
 pub trait SplitLinkTimings {
     /// The max time that can happen between successfully received frames

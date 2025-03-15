@@ -1,7 +1,4 @@
-use std::sync::{Arc, Mutex};
 
-use log::{Level, Log};
-use rustyline::ExternalPrinter;
 
 // pub struct RustyLineLog<P: ExternalPrinter> {
 //     level: Level,
