@@ -28,6 +28,7 @@ use cortex_m::delay::Delay;
 use dxkb_common::bus::BusWrite;
 use dxkb_common::time::{Clock, TimeDiff};
 use dxkb_common::dev_info;
+use dxkb_peripheral::clock::{DWTClock, TIMClock};
 use hid::KeyboardPageCode;
 use dxkb_peripheral::key_matrix::{
     ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, KeyState,
@@ -38,7 +39,7 @@ use panic_itm as _;
 
 use cortex_m_rt::entry;
 use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, UartDmaRb};
-use dxkb_split_link::{DefaultSplitLinkTimings, SplitBus, TestingTimings};
+use dxkb_split_link::{SplitBus, TestingTimings};
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::{Output, Pin};
 use stm32f4xx_hal::pac::{Interrupt, DMA2};
@@ -65,45 +66,6 @@ static mut INTR_PIN: Pin<'B', 8, Output> = unsafe {
     core::mem::zeroed()
 };
 
-
-pub struct DWTClock {
-    clock_freq: u32
-}
-
-#[derive(Clone, Copy)]
-pub struct DWTInstant {
-    cycles: u32,
-}
-
-impl DWTClock {
-    fn cycles_to_nanos(&self, cycles: u32) -> u64 {
-        cycles as u64 * 1_000_000_000u64 / self.clock_freq as u64
-    }
-}
-
-impl Clock for DWTClock {
-    type TInstant = DWTInstant;
-
-    fn current_instant(&self) -> Self::TInstant {
-        DWTInstant {
-            cycles: DWT::cycle_count(),
-        }
-    }
-
-    fn diff(&self, newer: Self::TInstant, older: Self::TInstant) -> TimeDiff {
-        let d = newer.cycles.wrapping_sub(older.cycles) as i32;
-        if d >= 0 {
-            TimeDiff::Forward(Duration::from_nanos(self.cycles_to_nanos(d as u32)))
-        } else {
-            TimeDiff::Backward(Duration::from_nanos(self.cycles_to_nanos((-1 * d) as u32)))
-        }
-    }
-
-    fn nanos(&self, instant: Self::TInstant) -> u64 {
-        self.cycles_to_nanos(instant.cycles)
-    }
-}
-
 #[entry]
 fn main() -> ! {
     main0()
@@ -113,11 +75,6 @@ fn main0() -> ! {
     let dp = pac::Peripherals::take().unwrap();
     let mut cortex = cortex_m::Peripherals::take().unwrap();
 
-    // TODO DWT DCB are DWT are debug extensions, not sure that this
-    // should be used in "production". I probably should do a Clock
-    // implementation based on a 32-bit clock.
-    cortex.DCB.enable_trace();
-    cortex.DWT.enable_cycle_counter();
     let rcc = dp.RCC.constrain();
 
     let clocks = rcc
@@ -132,8 +89,6 @@ fn main0() -> ! {
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
     let gpioc = dp.GPIOC.split();
-
-
 
     let mut suspend_led = gpioc.pc13.into_push_pull_output();
 
@@ -270,14 +225,14 @@ fn main0() -> ! {
 
     let mut uart_dma = UartDmaRb::init(dp.USART1, (tx, rx), dma2.7, dma2.5, unsafe{ &mut DMA_UART_TX_BUF }, unsafe { &mut SPLIT_BUS_BUF }, &clocks);
 
+    let clock = DWTClock::new(&clocks, &mut cortex.DCB, &mut cortex.DWT);
+
     let split_bus = unsafe {
         INTR_PIN = gpiob.pb8.into_push_pull_output();
         INTR_PIN.set_high();
 
         let sb = SPLIT_BUS.write(SplitBus::new(uart_dma,
-            DWTClock {
-                clock_freq: clocks.sysclk().raw(),
-            }
+            clock.clone()
         ));
 
         NVIC::unmask(Interrupt::USART1);

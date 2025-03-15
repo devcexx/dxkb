@@ -6,7 +6,6 @@ use core::cell::UnsafeCell;
 use core::fmt::Debug;
 use core::mem;
 use cortex_m::interrupt::Mutex;
-use dxkb_common::dev_trace;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use stm32f4xx_hal::dma::traits::DMASet;
 use stm32f4xx_hal::dma::MemoryToPeripheral;
@@ -251,7 +250,7 @@ Usart: DMASet<RxStream, RX_CH, PeripheralToMemory>,
              unsafe { mem::transmute_copy(&usart) },
              pins,
              Config::default()
-                 .baudrate(9600.bps())
+                 .baudrate(2000000.bps())
                  .parity_none()
                  .stopbits(StopBits::STOP1)
                  .wordlength_8()

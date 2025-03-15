@@ -391,9 +391,11 @@ version = "0.1.0"
 dependencies = [
  "cortex-m 0.7.7",
  "dxkb-common",
+ "enumflags2",
  "ringbuffer",
  "seq-macro",
  "stm32f4xx-hal",
+ "vcell",
 ]
 
 [[package]]

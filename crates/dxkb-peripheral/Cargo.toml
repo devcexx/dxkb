@@ -13,3 +13,5 @@ ringbuffer = { workspace = true }
 stm32f4xx-hal = { workspace = true }
 cortex-m = { workspace = true }
 seq-macro = { workspace = true }
+vcell = { workspace = true }
+enumflags2 = "*"
