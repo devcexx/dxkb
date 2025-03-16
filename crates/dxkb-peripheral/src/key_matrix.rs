@@ -10,7 +10,7 @@ use stm32f4xx_hal::{
     time::Hertz,
 };
 
-use dxkb_common::{dev_info, dev_trace};
+use dxkb_common::{dev_info, dev_trace, util::{BitMatrix, BitMatrixLayout, ColBitMatrixLayout}};
 
 use super::gpio::{GpioPort, GpioX};
 macro_rules! output_pins_impl {
@@ -386,8 +386,6 @@ where
 /// conforms to this trait. See [`ColumnScan`] and [`RowScan`] for
 /// more info.
 pub trait MatrixScan<const ROWS: u8, const COLS: u8, RowPins, ColPins>
-where
-    RowLayout<ROWS>: MatrixLayout,
 {
     type InPins: Pins;
     type OutPins: Pins;
@@ -405,7 +403,6 @@ pub struct ColumnScan {}
 impl<const ROWS: u8, const COLS: u8, RowPins, ColPins> MatrixScan<ROWS, COLS, RowPins, ColPins>
     for ColumnScan
 where
-    RowLayout<ROWS>: MatrixLayout,
     RowPins: InputPins<ROWS>,
     ColPins: OutputPins<COLS>,
 {
@@ -476,13 +473,13 @@ pub struct KeyMatrix<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D>
 where
     [(); ROWS as usize]:,
     S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
-    RowLayout<ROWS>: MatrixLayout,
+    ColBitMatrixLayout<COLS>: BitMatrixLayout,
 {
-    buf: [<RowLayout<ROWS> as MatrixLayout>::RowDataType; ROWS as usize],
+    matrix: BitMatrix<{ROWS as usize}, COLS>,
     input_pins: S::InPins,
     output_pins: S::OutPins,
     debouncer: D,
-    sysclk_freq: Hertz,
+    sysclk_freq: Hertz, // TODO Change by usage of Clock trait
 }
 
 impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D>
@@ -491,7 +488,7 @@ where
     [(); ROWS as usize]:,
     S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
     D: Debounce<ROWS, COLS>,
-    RowLayout<ROWS>: MatrixLayout,
+    ColBitMatrixLayout<COLS>: BitMatrixLayout,
     S::InPins: InputPins<{ S::InPins::COUNT }>,
     S::OutPins: OutputPins<{ S::OutPins::COUNT }>,
 {
@@ -501,7 +498,7 @@ where
         out_pins.setup_pins();
 
         Self {
-            buf: [Default::default(); ROWS as usize],
+            matrix: BitMatrix::new(),
             input_pins: in_pins,
             output_pins: out_pins,
             debouncer,
@@ -511,12 +508,12 @@ where
 
     #[inline(always)]
     pub fn get_key_state(&self, row: u8, col: u8) -> KeyState {
-        RowLayout::<ROWS>::get_state(self.buf[row as usize], col)
+        KeyState::from_bool(self.matrix.get_value(row as usize, col))
     }
 
     #[inline(always)]
     pub fn set_key_state(&mut self, row: u8, col: u8, state: KeyState) {
-        RowLayout::<ROWS>::set_state(&mut self.buf[row as usize], col, state);
+        self.matrix.set_value(row as usize, col, state == KeyState::Pressed);
     }
 
 

@@ -17,6 +17,7 @@
 
 mod hid;
 mod keyboard;
+mod layout;
 
 use core::arch::asm;
 use core::mem::MaybeUninit;
