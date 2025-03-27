@@ -384,12 +384,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "dxkb-core"
+version = "0.1.0"
+dependencies = [
+ "cortex-m 0.7.7",
+ "cortex-m-rt",
+ "crabtime",
+ "crc",
+ "dxkb-common",
+ "dxkb-peripheral",
+ "dxkb-split-link",
+ "heapless",
+ "itm_logger",
+ "log",
+ "panic-itm",
+ "ringbuffer",
+ "seq-macro",
+ "serde",
+ "ssmarshal",
+ "stm32f4xx-hal",
+ "synopsys-usb-otg",
+ "usb-device",
+ "usbd-hid",
+ "vcell",
+]
+
+[[package]]
 name = "dxkb-main"
 version = "0.1.0"
 dependencies = [
  "cortex-m 0.7.7",
  "cortex-m-rt",
  "dxkb-common",
+ "dxkb-core",
  "dxkb-peripheral",
  "dxkb-split-link",
  "itm_logger",

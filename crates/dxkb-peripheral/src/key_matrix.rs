@@ -10,7 +10,7 @@ use stm32f4xx_hal::{
     time::Hertz,
 };
 
-use dxkb_common::{dev_info, dev_trace, util::{BitMatrix, BitMatrixLayout, ColBitMatrixLayout}};
+use dxkb_common::{dev_info, dev_trace, util::{BitMatrix, BitMatrixLayout, ColBitMatrixLayout}, KeyState};
 
 use super::gpio::{GpioPort, GpioX};
 macro_rules! output_pins_impl {
@@ -167,28 +167,6 @@ pub trait IntoInputPinsWithSamePort {
 /// reading all the input values in all the pins in the same cycle!
 pub struct PinsWithSamePort<T> {
     pins: T,
-}
-
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum KeyState {
-    Released = 0,
-    Pressed = 1,
-}
-
-impl KeyState {
-    pub const fn from_bool(value: bool) -> KeyState {
-        match value {
-            true => KeyState::Pressed,
-            false => KeyState::Released,
-        }
-    }
-}
-
-impl Default for KeyState {
-    fn default() -> Self {
-        KeyState::Released
-    }
 }
 
 /// Represents a type that holds a read of the status of multiple
@@ -443,6 +421,23 @@ where
     }
 }
 
+pub trait KeyMatrixLike<const ROWS: u8, const COLS: u8> {
+    fn get_key_state(&self, row: u8, col: u8) -> KeyState;
+    fn set_key_state(&mut self, row: u8, col: u8, state: KeyState);
+
+    /// Scans the current status of the key matrix, returning true if
+    /// something has changed from the past scan.
+    fn scan_matrix(&mut self) -> bool {
+        self.scan_matrix_act(|_, _, _| {})
+    }
+
+    /// Scans the current status of the key matrix, returning true if
+    /// something has changed from the past scan. The function
+    /// `changed_fn` will be executed for each change detected in the
+    /// matrix.
+    fn scan_matrix_act<F: FnMut(u8, u8, KeyState) -> ()>(&mut self, changed_fn: F) -> bool;
+}
+
 /// A key matrix, constructed from the pins that forms the rows and
 /// the columns of the matrix. In this matrix, a key is considered
 /// pressed when it is active low.  More information about how key
@@ -506,20 +501,28 @@ where
         }
     }
 
+}
+
+impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D> KeyMatrixLike<ROWS, COLS> for KeyMatrix<ROWS, COLS, RowPins, ColPins, S, D> where
+    [(); ROWS as usize]:,
+    S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
+    D: Debounce<ROWS, COLS>,
+    ColBitMatrixLayout<COLS>: BitMatrixLayout,
+    S::InPins: InputPins<{ S::InPins::COUNT }>,
+    S::OutPins: OutputPins<{ S::OutPins::COUNT }>, {
+
     #[inline(always)]
-    pub fn get_key_state(&self, row: u8, col: u8) -> KeyState {
+    fn get_key_state(&self, row: u8, col: u8) -> KeyState {
         KeyState::from_bool(self.matrix.get_value(row as usize, col))
     }
 
     #[inline(always)]
-    pub fn set_key_state(&mut self, row: u8, col: u8, state: KeyState) {
+    fn set_key_state(&mut self, row: u8, col: u8, state: KeyState) {
         self.matrix.set_value(row as usize, col, state == KeyState::Pressed);
     }
 
 
-    /// Scans the current status of the key matrix, returning true if
-    /// something has changed from the past scan.
-    pub fn scan_matrix(&mut self) -> bool {
+    fn scan_matrix_act<F: FnMut(u8, u8, KeyState) -> ()>(&mut self, mut changed_fn: F) -> bool {
         let current_millis =
             ((DWT::cycle_count() as u64) * 1000 / self.sysclk_freq.raw() as u64) as u32;
         let mut has_changed = false;
@@ -552,6 +555,7 @@ where
                 if effective_state != prev_state {
                     has_changed = true;
                     self.set_key_state(row, col, effective_state);
+                    changed_fn(row, col, effective_state);
                     dev_info!(
                         "{:?} ({}; {}) ({} ms)",
                         effective_state,

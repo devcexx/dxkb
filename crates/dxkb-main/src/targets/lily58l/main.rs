@@ -15,10 +15,6 @@
 #![deny(rustdoc::bare_urls)]
 #![feature(generic_const_exprs)] // I'm sorry, I just want to do some basic math with const types.
 
-mod hid;
-mod keyboard;
-mod layout;
-
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
@@ -26,10 +22,11 @@ use core::ptr::addr_of_mut;
 use cortex_m::delay::Delay;
 use dxkb_common::dev_info;
 use dxkb_peripheral::clock::DWTClock;
-use hid::KeyboardPageCode;
 use dxkb_peripheral::key_matrix::{
-    ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, KeyState,
+    ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix,
 };
+
+mod layout;
 
 #[allow(unused_imports)]
 use panic_itm as _;
@@ -46,8 +43,8 @@ use usb_device::{
     device::{StringDescriptors, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
     LangID,
 };
+use usbd_hid::descriptor::{KeyboardReport, KeyboardUsage, SerializedDescriptor};
 use usbd_hid::{
-    descriptor::KeyboardReport,
     hid_class::{
         HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig,
     },
@@ -65,6 +62,8 @@ static mut INTR_PIN: Pin<'B', 8, Output> = unsafe {
 
 #[entry]
 fn main() -> ! {
+    layout::do_something();
+
     main0()
 }
 
@@ -76,8 +75,8 @@ fn main0() -> ! {
 
     let clocks = rcc
         .cfgr
-        .use_hse(25.MHz()) /* My WeAct BlackPill has a 25MHz external clock attached. Change to match your config! */
-        .sysclk(96.MHz()) /* Sysclk is set to 96 MHz, so PLL for usb devices can be set to exactly 48MHz */
+        .use_hse(25.MHz())
+        .sysclk(96.MHz())
         .pclk1(48.MHz())
         .pclk2(48.MHz())
         .require_pll48clk()
@@ -118,10 +117,10 @@ fn main0() -> ! {
 
     #[rustfmt::skip]
     let layout = [
-        KeyboardPageCode::One, KeyboardPageCode::Two, KeyboardPageCode::Three, KeyboardPageCode::Four,
-        KeyboardPageCode::Q, KeyboardPageCode::W, KeyboardPageCode::E, KeyboardPageCode::R,
-        KeyboardPageCode::A, KeyboardPageCode::S, KeyboardPageCode::D, KeyboardPageCode::F,
-        KeyboardPageCode::Z, KeyboardPageCode::X, KeyboardPageCode::C, KeyboardPageCode::V,
+        KeyboardUsage::Keyboard1Exclamation, KeyboardUsage::Keyboard2At, KeyboardUsage::Keyboard3Hash, KeyboardUsage::Keyboard4Dollar,
+        KeyboardUsage::KeyboardQq, KeyboardUsage::KeyboardWw, KeyboardUsage::KeyboardEe, KeyboardUsage::KeyboardRr,
+        KeyboardUsage::KeyboardAa, KeyboardUsage::KeyboardSs, KeyboardUsage::KeyboardDd, KeyboardUsage::KeyboardFf,
+        KeyboardUsage::KeyboardZz, KeyboardUsage::KeyboardXx, KeyboardUsage::KeyboardCc, KeyboardUsage::KeyboardVv,
     ];
 
     let usb = USB {
@@ -190,32 +189,6 @@ fn main0() -> ! {
 
     // TODO Make USART NVIC interrupts a priority in which they cannot be preempted by any other interrupt.
 
-    const NZXT_HUE2_DESCRIPTOR: [u8; 34] = [0x06, 0x72, 0xFF, 0x09, 0xA1, 0xA1, 0x01, 0x09, 0x10, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x40, 0x81, 0x02, 0x09, 0x11, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x40, 0x91, 0x02, 0xC0];
-    let mut kbd_hid = HIDClass::new_ep_in_with_settings(
-        &bus_allocator,
-        &NZXT_HUE2_DESCRIPTOR,
-        1,
-        HidClassSettings {
-            subclass: HidSubClass::NoSubClass,
-            protocol: HidProtocol::Keyboard,
-            config: ProtocolModeConfig::DefaultBehavior,
-            locale: HidCountryCode::Spanish,
-        },
-    );
-
-    let mut usb_dev = UsbDeviceBuilder::new(&bus_allocator, UsbVidPid(0x16c0, 0x27db))
-        .device_class(0x3) // HID Device
-        .device_sub_class(HidSubClass::NoSubClass as u8) // No subclass
-        .device_protocol(HidProtocol::Generic as u8)
-        .usb_rev(usb_device::device::UsbRev::Usb200)
-        .strings(&[StringDescriptors::new(LangID::ES)
-            .serial_number("0")
-            .manufacturer("Dobetito")
-            .product("DXKB Lily58L")])
-        .unwrap()
-        .supports_remote_wakeup(true)
-        .build();
-
     let mut prev_usb_status: Option<UsbDeviceState> = None;
 
     let mut last_led_change_ticks = DWT::cycle_count();
@@ -232,80 +205,74 @@ fn main0() -> ! {
             clock.clone()
         ));
 
-        NVIC::unmask(Interrupt::USART1);
+//        NVIC::unmask(Interrupt::USART1);
         sb
     };
+
     loop {
+        // let mut count = 0;
+        // split_bus.poll(|frame| {
+        //     count+=1;
 
-        let mut count = 0;
-        split_bus.poll(|frame| {
-            count+=1;
-
-            dev_info!("Received frame: {:?}", frame);
-        });
+        //     dev_info!("Received frame: {:?}", frame);
+        // });
 
 
-        let cur_usb_status = Some(usb_dev.state());
-        if prev_usb_status != cur_usb_status {
-            dev_info!("USB device status changed to {:?}; Remote wakeup? {}", usb_dev.state(), usb_dev.remote_wakeup_enabled());
-            prev_usb_status = Some(usb_dev.state());
-        }
+        // let cur_usb_status = Some(usb_dev.state());
+        // if prev_usb_status != cur_usb_status {
+        //     dev_info!("USB device status changed to {:?}; Remote wakeup? {}", usb_dev.state(), usb_dev.remote_wakeup_enabled());
+        //     prev_usb_status = Some(usb_dev.state());
+        // }
 
-        if usb_dev.poll(&mut [&mut kbd_hid]) {
-            let mut report_buf = [0u8; 64];
-            if let Ok(_report) = kbd_hid.pull_raw_report(&mut report_buf) {
 
-                let _ = kbd_hid.push_raw_input(&report_buf).unwrap();
-            }
-        }
 
-        let changed = matrix.scan_matrix();
-        if usb_dev.state() == UsbDeviceState::Suspend {
-            if usb_dev.remote_wakeup_enabled() {
-                // Just a led animation for testing
-                let elapsed_ms = (DWT::cycle_count() - last_led_change_ticks) as u64 * 1000 / clocks.hclk().raw() as u64;
-                if elapsed_ms > 300 {
-                    last_led_change_ticks = DWT::cycle_count();
-                    suspend_led.toggle();
-                }
+        // let changed = matrix.scan_matrix();
+        // if usb_dev.state() == UsbDeviceState::Suspend {
+        //     if usb_dev.remote_wakeup_enabled() {
+        //         // Just a led animation for testing
+        //         let elapsed_ms = (DWT::cycle_count() - last_led_change_ticks) as u64 * 1000 / clocks.hclk().raw() as u64;
+        //         if elapsed_ms > 300 {
+        //             last_led_change_ticks = DWT::cycle_count();
+        //             suspend_led.toggle();
+        //         }
 
-                if changed {
-                    suspend_led.set_high();
-                    let dv = unsafe {
-                        OTG_FS_DEVICE::steal()
-                    };
-                    dv.dctl().modify(|_, w| {
-                        w.rwusig().set_bit()
-                    });
-                    delay.delay_ms(5); // According to datasheet, bit needs to be turned on between 1 and 15 ms.
-                    dv.dctl().modify(|_, w| {
-                        w.rwusig().clear_bit()
-                    });
-                }
-            } else {
-                suspend_led.set_high();
-            }
+        //         if changed {
+        //             suspend_led.set_high();
+        //             let dv = unsafe {
+        //                 OTG_FS_DEVICE::steal()
+        //             };
+        //             dv.dctl().modify(|_, w| {
+        //                 w.rwusig().set_bit()
+        //             });
+        //             delay.delay_ms(5); // According to datasheet, bit needs to be turned on between 1 and 15 ms.
+        //             dv.dctl().modify(|_, w| {
+        //                 w.rwusig().clear_bit()
+        //             });
+        //         }
+        //     } else {
+        //         suspend_led.set_high();
+        //     }
 
-        } else {
-            suspend_led.set_high();
-            let mut report = KeyboardReport::default();
+        // } else {
+        //     suspend_led.set_high();
+        //     let mut report = KeyboardReport::default();
 
-            let mut next_index = 0;
-            'out: for col in 0..4 {
-                for row in 0..4 {
-                    if next_index >= 6 {
-                        break 'out;
-                    }
+        //     let mut next_index = 0;
+        //     'out: for col in 0..4 {
+        //         for row in 0..4 {
+        //             if next_index >= 6 {
+        //                 break 'out;
+        //             }
 
-                    if matrix.get_key_state(row, col) == KeyState::Pressed {
-                        report.keycodes[next_index] = layout[row as usize * 4 + col as usize] as u8;
-                        next_index += 1;
-                    }
-                }
-            }
+        //             if matrix.get_key_state(row, col) == KeyState::Pressed {
+        //                 report.keycodes[next_index] = layout[row as usize * 4 + col as usize] as u8;
+        //                 next_index += 1;
+        //             }
+        //         }
+        //     }
 
-           // let _ = kbd_hid.push_input(&report);
-        }
+        //    // let _ = kbd_hid.push_input(&report);
+        // }
     }
 }
 

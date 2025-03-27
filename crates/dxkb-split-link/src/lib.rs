@@ -188,6 +188,11 @@ pub enum LinkStatus {
     Up
 }
 
+pub trait SplitBusLike<Msg> {
+    fn poll<F: FnMut(&Msg) -> ()>(&mut self, recvf: F);
+    fn transfer(&mut self, message: Msg) -> Result<(), TransferError>;
+}
+
 pub struct SplitBus<Msg, Ts: SplitLinkTimings, B: BusWrite + BusRead, CS: Clock, const TX_QUEUE_LEN: usize> {
     bus: B,
     clock: CS,
@@ -563,24 +568,25 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
         }
     }
 
-    pub fn poll<F: FnMut(&Msg) -> ()>(&mut self, recvf: F) {
+    pub fn user_tx_queue_len(&self) -> usize {
+        self.user_tx_queue.len()
+    }
+
+}
+
+impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B: BusWrite + BusRead, CS: Clock, const TX_QUEUE_LEN: usize> SplitBusLike<Msg> for SplitBus<Msg, Ts, B, CS, TX_QUEUE_LEN> where [(); MaxFrameLength::<Msg>::MAX_FRAME_LENGTH]:, [(); MaxFrameLength::<NoMsg>::MAX_FRAME_LENGTH]: {
+    fn poll<F: FnMut(&Msg) -> ()>(&mut self, recvf: F) {
         self.do_rx(recvf);
         self.do_timed_actions();
         self.do_tx();
     }
 
-    pub fn transfer(&mut self, message: Msg) -> Result<(), TransferError> {
+    fn transfer(&mut self, message: Msg) -> Result<(), TransferError> {
         if self.user_tx_queue.is_full() {
             return Err(TransferError::BufferOverflow);
         } else {
             self.user_tx_queue.push(message);
             return Ok(())
         }
-
     }
-
-    pub fn user_tx_queue_len(&self) -> usize {
-        self.user_tx_queue.len()
-    }
-
 }

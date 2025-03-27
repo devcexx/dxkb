@@ -1,27 +1,19 @@
 [package]
-name = "dxkb-main"
+name = "dxkb-core"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "dxkb-lily58l-stm32f411"
-path = "src/targets/lily58l/main.rs"
-required-features = ["stm32f411"]
-
-[[bin]]
-name = "testing"
-path = "src/targets/testing/main.rs"
-required-features = ["stm32f411"]
-  
 [features]
+default = ["stm32f411"]
 stm32f411 = ["stm32f4xx-hal/stm32f411", "dxkb-peripheral/stm32f411"]
-  
 
 [dependencies]
 dxkb-common = { path = "../dxkb-common", features = ["dev-log-level-trace"] }
-dxkb-core = { path = "../dxkb-core" }
 dxkb-peripheral = { path = "../dxkb-peripheral" }
 dxkb-split-link = { path = "../dxkb-split-link" }
+
+crc = { workspace = true }
+serde = { workspace = true }
 
 cortex-m = { workspace = true }
 cortex-m-rt = { workspace = true }
@@ -30,14 +22,14 @@ log = { workspace = true }
 panic-itm = { workspace = true }
 ringbuffer = { workspace = true, default-features = false }
 seq-macro = { workspace = true }
-serde = { workspace = true, default-features = false, features = ["derive"] }
 ssmarshal = { workspace = true, default-features = false }
 stm32f4xx-hal = { workspace = true, features = ["usb_fs"] }
 synopsys-usb-otg = { workspace = true, features = ["cortex-m", "fs"] }
 usb-device = { workspace = true }
 usbd-hid = { workspace = true }
 vcell = { workspace = true }
+crabtime = { workspace = true }
+heapless = "0.8.0"
 
-[profile.release-with-debug]
-inherits = "release"
-debug = true
+[build-dependencies]
+usbd-hid = "0.8.2"

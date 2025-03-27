@@ -4,6 +4,8 @@ pub mod bus;
 pub mod time;
 mod devlog;
 pub mod util;
+mod key;
+pub use key::*;
 
 pub use log as __log;
 

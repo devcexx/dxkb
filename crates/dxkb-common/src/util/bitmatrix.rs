@@ -8,7 +8,10 @@ use crate::dev_info;
 pub trait BitMatrixLayout {
     type ColType: Copy + Default + Debug + Binary;
 
-    fn set_state(elem: &mut Self::ColType, col: u8, value: bool);
+    /// Sets the state of the requested bit at the given column, and
+    /// returns a value indicating whether the value has actually
+    /// changed from the previous one.
+    fn set_state(elem: &mut Self::ColType, col: u8, value: bool) -> bool;
     fn get_state(elem: Self::ColType, col: u8) -> bool;
 }
 pub struct ColBitMatrixLayout<const COLS: u8> {}
@@ -29,14 +32,19 @@ fn gen_bit_matrix_layout_impls() {
             impl BitMatrixLayout for ColBitMatrixLayout<{{bits}}> {
                 type ColType = {{typ}};
 
-                fn set_state(elem: &mut Self::ColType, col: u8, value: bool) {
+                #[inline(always)]
+                fn set_state(elem: &mut Self::ColType, col: u8, value: bool) -> bool {
+                    let prev = *elem;
                     if value {
                         *elem |= 1 << col;
                     } else {
                         *elem &= !(1 << col);
                     }
+
+                    prev != *elem
                 }
 
+                #[inline(always)]
                 fn get_state(elem: Self::ColType, col: u8) -> bool {
                     (elem & (1 << col)) > 0
                 }
@@ -59,6 +67,7 @@ impl<const ROWS: usize, const COLS: u8> BitMatrix<ROWS, COLS> where ColBitMatrix
         }
     }
 
+    #[inline(always)]
     pub fn get_value(&self, row: usize, col: u8) -> bool {
         assert!(row < ROWS, "Row out of bounds");
         assert!(col < COLS, "Col out of bounds");
@@ -66,10 +75,11 @@ impl<const ROWS: usize, const COLS: u8> BitMatrix<ROWS, COLS> where ColBitMatrix
         <ColBitMatrixLayout<COLS> as BitMatrixLayout>::get_state(self.buf[row], col)
     }
 
-    pub fn set_value(&mut self, row: usize, col: u8, value: bool) {
+    #[inline(always)]
+    pub fn set_value(&mut self, row: usize, col: u8, value: bool) -> bool {
         assert!(row < ROWS, "Row out of bounds");
         assert!(col < COLS, "Col out of bounds");
 
-        <ColBitMatrixLayout<COLS> as BitMatrixLayout>::set_state(&mut self.buf[row], col, value);
+        <ColBitMatrixLayout<COLS> as BitMatrixLayout>::set_state(&mut self.buf[row], col, value)
     }
 }
