@@ -1,4 +1,4 @@
-use core::marker::PhantomData;
+use core::{marker::PhantomData, mem::MaybeUninit};
 
 use dxkb_peripheral::key_matrix::{KeyMatrix, KeyMatrixLike};
 use dxkb_split_link::SplitBusLike;
@@ -6,8 +6,8 @@ use heapless::Vec;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use serde::{Deserialize, Serialize};
 use usb_device::{bus::{UsbBus, UsbBusAllocator}, device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid}, LangID};
-use usbd_hid::{descriptor::{KeyboardReport, KeyboardUsage, SerializedDescriptor}, hid_class::{HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig}};
-use dxkb_common::{dev_info, dev_warn, util::{BitMatrix, BitMatrixLayout, BoundedIndex, ColBitMatrixLayout}, KeyState};
+use usbd_hid::{descriptor::{KeyboardReport, KeyboardUsage, SerializedDescriptor}, hid_class::{HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig}, UsbError};
+use dxkb_common::{dev_debug, dev_error, dev_info, dev_warn, util::{BitMatrix, BitMatrixLayout, BoundedIndex, ColBitMatrixLayout}, KeyState};
 
 use crate::keys::FunctionKey;
 
@@ -84,13 +84,16 @@ ColBitMatrixLayout<LCOLS>: BitMatrixLayout,
 [(); LLAYERS as usize]:,
 [(); LCOLS as usize]:,
 [(); LROWS as usize]: {
-
         usb_device: UsbDevice<'usb, USB>,
         kbd_hid: HIDClass<'usb, USB>,
         matrix: Matrix,
         layout: SplitKeyboardLayout<LayoutConfig, LLAYERS, LROWS, LCOLS>,
         split_bus: SplitBus,
         master: bool,
+
+        /// Holds the in keyboard report pending to be sent, that have
+        /// previously failed to be sent because the usb device was busy.
+        pending_in_keyb_report: Option<KeyboardReport>,
         _side: PhantomData<Side>,
         _layout_config: PhantomData<LayoutConfig>
 }
@@ -165,6 +168,7 @@ SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
             layout,
             split_bus,
             master,
+            pending_in_keyb_report: None,
             _side: PhantomData,
             _layout_config: PhantomData
         }
@@ -184,7 +188,7 @@ SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
          } else if usb_keys_pressed_report.first() == Some(&(KeyboardUsage::KeyboardErrorRollOver as u8)) {
              // Too many pressed keys already, ignore.
          } else {
-             usb_keys_pressed_report.push(new_key as u8);
+             let _ = usb_keys_pressed_report.push(new_key as u8);
          }
      }
 
@@ -215,6 +219,23 @@ SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
          changed
      }
 
+     #[inline(always)]
+     fn handle_keyb_tx_result(&mut self, result: Result<usize, UsbError>) {
+         match result {
+             Ok(_) => {
+                 let _ = self.pending_in_keyb_report.take();
+             },
+             Err(UsbError::WouldBlock) => {
+                 // Do nothing, leave the report there until we
+                 // are able to send it, or if new changes
+                 // superseeds the last stored report.
+             },
+             Err(e) => {
+                 dev_error!("USB xfer error failed: {:?}", e);
+             }
+         }
+     }
+
      fn poll_master(&mut self) {
          let matrix_changed = self.matrix.scan_matrix();
          let mut keys_changed = false;
@@ -234,63 +255,43 @@ SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
          }
 
 
-         // TODO This doesn't compile
-
-         // TODO I probably need to define an interface in the split
-         // bus that allows to pick only the next N messages, so the
-         // caller can have a buffer where store some data before
-         // processing it. In this case, I'm not able to use mut self
-         // inside the closure because it has been partially borrowed
-         // as mut because of self.split_bus. That could help to fix
-         // that.
-
-         // self.split_bus.poll(|msg| {
-         //     match msg {
-         //         SplitKeyboardLinkMessage::MatrixKeyDown { row, col } => {
-         //             keys_changed |= self.layout_update_key_state::<CurSide::Opposite>(&mut usb_keys_pressed_report, *row, *col, KeyState::Pressed);
-         //         },
-         //         SplitKeyboardLinkMessage::MatrixKeyUp { row, col } => {
-         //             keys_changed |= self.layout_update_key_state::<CurSide::Opposite>(&mut usb_keys_pressed_report, *row, *col, KeyState::Released);
-         //         },
-         //     }
-         // });
-
-         let mut pressed_keys_idx: [u8; 6] = [0u8; 6];
-
+         let mut incoming_split_msgs = Vec::<SplitKeyboardLinkMessage, 16>::new();
+         self.split_bus.poll_into_vec(&mut incoming_split_msgs);
+         for msg in incoming_split_msgs {
+             match msg {
+                 SplitKeyboardLinkMessage::MatrixKeyDown { row, col } => {
+                     keys_changed |= self.layout_update_key_state::<CurSide::Opposite>(&mut usb_keys_pressed_report, row, col, KeyState::Pressed);
+                 },
+                 SplitKeyboardLinkMessage::MatrixKeyUp { row, col } => {
+                     keys_changed |= self.layout_update_key_state::<CurSide::Opposite>(&mut usb_keys_pressed_report, row, col, KeyState::Released);
+                 },
+             }
+         }
 
          if self.usb_device.poll(&mut [&mut self.kbd_hid]) {
-
-
-             // TODO Is there any way to only write the data we need
-             // to send when the host requests for it? so we can
-             // always provide it the most up-to-date information.
-
-             // TODO Maybe is a good idea to generate this report
-             // on-the-fly instead of iterate over the whole matrix
-             // again to check which ones are pressed?
-             let mut report = KeyboardReport::default();
-
-             // TODO NKRO support
-             if self.layout.get_number_keys_pressed() > 6 {
-                 report.keycodes[0] = KeyboardUsage::KeyboardErrorRollOver as u8;
-             } else {
-                 // let mut found: usize = 0;
-                 // 'out: for col in 0..4 {
-                 //     for row in 0..4 {
-                 //         if found >= self.layout.get_number_keys_pressed() as usize {
-                 //             break 'out;
-                 //         }
-
-                 //         if self.matrix.get_key_state(row, col) == KeyState::Pressed {
-                 //             report.keycodes[found] = self.layout.get_key_definition(row, col);
-                 //             next_index += 1;
-                 //         }
-                 //     }
-                 // }
+             // TODO do something with this
+             let mut reportbuf = [0u8; size_of::<KeyboardReport>()];
+             if let Ok(report) = self.kbd_hid.pull_raw_report(&mut reportbuf) {
+                 dev_debug!("Report received: {:?}", report);
              }
+         }
 
+         if keys_changed {
+             let report = self.pending_in_keyb_report.insert(KeyboardReport::default());
+             report.keycodes.copy_from_slice(&usb_keys_pressed_report);
 
-
+             // TODO This method writes to the USB FIFO once we have
+             // data ready to be sent, but not when the host requests
+             // it. This means that, when the host requests it, there
+             // might be some outdated information in the Tx FIFO that
+             // will be sent. Eventually could be interesting to flush
+             // the TX FIFO before sending, by writing to the TXFFLSH
+             // register.
+             let res = self.kbd_hid.push_input(report);
+             self.handle_keyb_tx_result(res);
+         } else if let Some(report) = &self.pending_in_keyb_report {
+             let res = self.kbd_hid.push_input(report);
+             self.handle_keyb_tx_result(res);
          }
 
      }
@@ -315,8 +316,17 @@ SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
                  SplitKeyboardLinkMessage::MatrixKeyUp { row: _, col:  _ } => {
                      dev_warn!("Unexpected MatrixKeyDown message received while in slave mode");
                  },
-            }
+             }
+             true
          });
+     }
+
+     pub fn poll(&mut self) {
+         if self.master {
+             self.poll_master();
+         } else {
+             self.poll_slave();
+         }
      }
  }
 
@@ -375,11 +385,23 @@ SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
 
 #[derive(Clone, Copy)]
 pub enum LayoutKey {
-    Standard(usbd_hid::descriptor::KeyboardUsage),
+    Standard(KeyboardUsage),
 
     // TODO This makes "hard" to define custom function keys, because
     // it is hard to pass a custom context to it. Is there a better way of doing this?
     Function(&'static dyn FunctionKey),
+}
+
+impl From<KeyboardUsage> for LayoutKey {
+    fn from(value: KeyboardUsage) -> Self {
+        LayoutKey::Standard(value)
+    }
+}
+
+impl From<&'static dyn FunctionKey> for LayoutKey {
+    fn from(value: &'static dyn FunctionKey) -> Self {
+        LayoutKey::Function(value)
+    }
 }
 
 pub trait SplitLayoutConfig {
@@ -402,13 +424,41 @@ impl<Config: SplitLayoutConfig> SideLayoutOffset<Config> for Right {
     const SIDE_COL_OFFSET: u8 = Config::SPLIT_RIGHT_COL_OFFSET;
 }
 
+#[repr(transparent)]
+pub struct LayerRow<const COLS: u8> where [(); COLS as usize]: {
+    row: [LayoutKey; COLS as usize]
+}
+
+impl<const COLS: u8> LayerRow<COLS> where [(); COLS as usize]: {
+    pub const fn new(row: [LayoutKey; COLS as usize]) -> Self {
+        Self {
+            row
+        }
+    }
+
+    pub fn new_from(row: [impl Into<LayoutKey>; COLS as usize]) -> Self {
+        Self {
+            row: row.map(|e| e.into())
+        }
+    }
+}
+
+
 pub struct LayoutLayer<const ROWS: u8, const COLS: u8> where [(); COLS as usize]:, [(); ROWS as usize]: {
-    keys: [[LayoutKey; COLS as usize]; ROWS as usize]
+    keys: [LayerRow<COLS>; ROWS as usize]
+}
+
+impl<const ROWS: u8, const COLS: u8> LayoutLayer<ROWS, COLS> where [(); COLS as usize]:, [(); ROWS as usize]: {
+    pub const fn new(keys: [LayerRow<COLS>; ROWS as usize]) -> Self {
+        Self {
+            keys
+        }
+    }
 }
 
 impl<const ROWS: u8, const COLS: u8> LayoutLayer<ROWS, COLS> where [(); COLS as usize]:, [(); ROWS as usize]: {
     fn get_key_definition(&self, row: u8, col: u8) -> LayoutKey {
-        self.keys[row as usize][col as usize]
+        self.keys[row as usize].row[col as usize]
     }
 }
 
@@ -432,7 +482,7 @@ impl<C: SplitLayoutConfig, const LAYERS: u8, const ROWS: u8, const COLS: u8> Spl
         assert!(LAYERS > 0, "There must be at least 1 layer in the layout!");
     }
 
-    pub fn new(layers: [LayoutLayer<ROWS, COLS>; LAYERS as usize]) -> Self {
+    pub const fn new(layers: [LayoutLayer<ROWS, COLS>; LAYERS as usize]) -> Self {
         const {
             Self::assert_config_ok()
         };
@@ -481,7 +531,7 @@ impl<C: SplitLayoutConfig, const LAYERS: u8, const ROWS: u8, const COLS: u8> Spl
 
     #[inline(always)]
     fn get_key_definition(&self, row: u8, col: u8) -> LayoutKey {
-        self.layers[self.current_layer].keys[row as usize][col as usize]
+        self.layers[self.current_layer].get_key_definition(row, col)
     }
 
     fn get_number_keys_pressed(&self) -> u16 {

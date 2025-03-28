@@ -6,6 +6,12 @@ edition = "2024"
 [[bin]]
 name = "dxkb-lily58l-stm32f411"
 path = "src/targets/lily58l/main.rs"
+  required-features = ["stm32f411"]
+
+  
+[[bin]]
+name = "testkb-4x4-stm32f411"
+path = "src/targets/testkb_4x4/main.rs"
 required-features = ["stm32f411"]
 
 [[bin]]

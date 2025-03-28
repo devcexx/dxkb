@@ -29,7 +29,7 @@ usb-device = { workspace = true }
 usbd-hid = { workspace = true }
 vcell = { workspace = true }
 crabtime = { workspace = true }
-heapless = "0.8.0"
+heapless = { workspace = true }
 
 [build-dependencies]
 usbd-hid = "0.8.2"

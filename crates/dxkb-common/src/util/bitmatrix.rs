@@ -1,12 +1,8 @@
-use core::{fmt::{Binary, Debug}, ops::Index, slice::SliceIndex};
-
-use crate::dev_info;
-
-
-
+use core::fmt::{Binary, Debug};
 
 pub trait BitMatrixLayout {
     type ColType: Copy + Default + Debug + Binary;
+    const ZERO: Self::ColType;
 
     /// Sets the state of the requested bit at the given column, and
     /// returns a value indicating whether the value has actually
@@ -30,6 +26,7 @@ fn gen_bit_matrix_layout_impls() {
 
         crabtime::output! {
             impl BitMatrixLayout for ColBitMatrixLayout<{{bits}}> {
+                const ZERO: {{typ}} = 0;
                 type ColType = {{typ}};
 
                 #[inline(always)]
@@ -61,9 +58,9 @@ pub struct BitMatrix<const ROWS: usize, const COLS: u8> where ColBitMatrixLayout
 }
 
 impl<const ROWS: usize, const COLS: u8> BitMatrix<ROWS, COLS> where ColBitMatrixLayout<COLS>: BitMatrixLayout {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            buf: [Default::default(); ROWS]
+            buf: [ColBitMatrixLayout::<COLS>::ZERO; ROWS]
         }
     }
 

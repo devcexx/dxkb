@@ -49,6 +49,7 @@ use core::marker::PhantomData;
 use core::time::Duration;
 use crc::Table;
 use dxkb_common::time::Clock;
+use heapless::Vec;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -188,8 +189,27 @@ pub enum LinkStatus {
     Up
 }
 
-pub trait SplitBusLike<Msg> {
-    fn poll<F: FnMut(&Msg) -> ()>(&mut self, recvf: F);
+pub trait SplitBusLike<Msg: Clone + Debug> {
+    fn poll<F: FnMut(&Msg) -> bool>(&mut self, recvf: F);
+
+    #[inline]
+    fn poll_max<F: FnMut(&Msg, usize) -> ()>(&mut self, max_msg_count: usize, mut recvf: F) -> usize {
+        let mut received = max_msg_count;
+        self.poll(|msg| {
+            recvf(msg, received);
+            received += 1;
+            received < max_msg_count
+        });
+
+        received
+    }
+
+    #[inline]
+    fn poll_into_vec<const MAX: usize>(&mut self, buf: &mut Vec<Msg, MAX>) -> usize {
+        self.poll_max(MAX, |msg, offset| {
+            buf[offset] = msg.clone();
+        })
+    }
     fn transfer(&mut self, message: Msg) -> Result<(), TransferError>;
 }
 
@@ -343,8 +363,14 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
         self.control_tx_queue.push(frame);
     }
 
-    /// Mutates the current state of the link based on a received frame.
-    fn handle_rx_frame<F: FnMut(&Msg) -> ()>(&mut self, frame: &Frame<Msg>, recvf: &mut F) {
+    /// Mutates the current state of the link based on a received
+    /// frame. Returns a value that indicates whether it should
+    /// continue polling, depending on the function provided by the
+    /// user and the last received frame. The continuing decision will
+    /// be always true unless the next frame type is a message, in
+    /// which case, the function provided is executed, and its result
+    /// is used as result for this function.
+    fn handle_rx_frame<F: FnMut(&Msg) -> bool>(&mut self, frame: &Frame<Msg>, recvf: &mut F) -> bool {
         match frame.envelope.content {
             FrameContent::LinkProbe => {
                 // There's nothing to do with this frame, unless the
@@ -448,7 +474,7 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
 
                         self.rx_seq = frame.envelope.seq.wrapping_add(1);
 
-                        recvf(msg)
+                        return recvf(msg);
                     }
                 } else {
                     dev_debug!("Received transport frame when link status was not Up. Silently discarding frame");
@@ -456,9 +482,10 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
             },
         }
 
+        true
     }
 
-    fn do_rx<F: FnMut(&Msg) -> ()>(&mut self, mut recvf: F) {
+    fn do_rx<F: FnMut(&Msg) -> bool>(&mut self, mut recvf: F) {
         let mut rxbuf = [0u8; {MaxFrameLength::<Msg>::MAX_FRAME_LENGTH}];
         while {
             let should_continue = match self.bus.poll_next(&mut rxbuf) {
@@ -467,19 +494,21 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
                     match Self::decode_frame(&rxbuf[0..frame_len as usize]) {
                         Ok(frame) => {
                             self.last_recv_frame_time = self.clock.current_instant();
-                            self.handle_rx_frame(&frame, &mut recvf);
+                            self.handle_rx_frame(&frame, &mut recvf)
                         },
                         Err(FrameDecodeError::PreludeError) => {
                             dev_debug!("Invalid prelude in frame. Dropping frame");
+                            true
                         },
                         Err(FrameDecodeError::CrcError) => {
                             dev_debug!("Invalid frame CRC. Dropping frame");
+                            true
                         },
                         Err(e @ FrameDecodeError::SerdeError(_)) => {
                             dev_debug!("Failed to parse frame: {:?}", e);
+                            true
                         }
                     }
-                    true
                 },
                 Err(BusPollError::BufferOverflow) => true,
                 Err(BusPollError::WouldBlock) => false,
@@ -575,7 +604,7 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
 }
 
 impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B: BusWrite + BusRead, CS: Clock, const TX_QUEUE_LEN: usize> SplitBusLike<Msg> for SplitBus<Msg, Ts, B, CS, TX_QUEUE_LEN> where [(); MaxFrameLength::<Msg>::MAX_FRAME_LENGTH]:, [(); MaxFrameLength::<NoMsg>::MAX_FRAME_LENGTH]: {
-    fn poll<F: FnMut(&Msg) -> ()>(&mut self, recvf: F) {
+    fn poll<F: FnMut(&Msg) -> bool>(&mut self, recvf: F) {
         self.do_rx(recvf);
         self.do_timed_actions();
         self.do_tx();

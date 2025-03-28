@@ -10,3 +10,4 @@ ringbuffer = { workspace = true, default-features = false }
 crc = { workspace = true }
 ssmarshal = { workspace = true }
 serde = { workspace = true }
+heapless = { workspace = true }
