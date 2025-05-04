@@ -18,11 +18,7 @@ impl<const LENGTH: usize> BoundedIndex<LENGTH> {
     }
 
     pub fn from_value(val: usize) -> Option<Self> {
-        if val < LENGTH {
-            Some(Self(val))
-        } else {
-            None
-        }
+        if val < LENGTH { Some(Self(val)) } else { None }
     }
 
     #[inline(always)]

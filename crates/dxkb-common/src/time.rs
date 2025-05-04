@@ -2,7 +2,7 @@ use core::time::Duration;
 
 pub enum TimeDiff {
     Forward(Duration),
-    Backward(Duration)
+    Backward(Duration),
 }
 
 impl TimeDiff {
@@ -24,7 +24,8 @@ pub trait Clock {
     fn current_instant(&self) -> Self::TInstant;
 
     fn elapsed_since(&self, past_instant: Self::TInstant) -> Duration {
-        self.diff(self.current_instant(), past_instant).ensure_forward()
+        self.diff(self.current_instant(), past_instant)
+            .ensure_forward()
     }
 
     fn diff(&self, newer: Self::TInstant, older: Self::TInstant) -> TimeDiff;

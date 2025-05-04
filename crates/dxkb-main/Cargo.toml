@@ -10,8 +10,8 @@ path = "src/targets/lily58l/main.rs"
 
   
 [[bin]]
-name = "testkb-4x4-stm32f411"
-path = "src/targets/testkb_4x4/main.rs"
+name = "testkb-3x5-stm32f411"
+path = "src/targets/testkb_3x5/main.rs"
 required-features = ["stm32f411"]
 
 [[bin]]
@@ -21,6 +21,7 @@ required-features = ["stm32f411"]
   
 [features]
 stm32f411 = ["stm32f4xx-hal/stm32f411", "dxkb-peripheral/stm32f411"]
+master = []
   
 
 [dependencies]
@@ -43,7 +44,3 @@ synopsys-usb-otg = { workspace = true, features = ["cortex-m", "fs"] }
 usb-device = { workspace = true }
 usbd-hid = { workspace = true }
 vcell = { workspace = true }
-
-[profile.release-with-debug]
-inherits = "release"
-debug = true

@@ -1,14 +1,13 @@
 #![no_std]
 
 pub mod bus;
-pub mod time;
 mod devlog;
-pub mod util;
 mod key;
+pub mod time;
+pub mod util;
 pub use key::*;
 
 pub use log as __log;
-
 
 #[macro_export]
 macro_rules! diff_wrapped {

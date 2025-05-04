@@ -3,20 +3,37 @@
 
 mod logger;
 
-use std::{collections::LinkedList, io::{Cursor, ErrorKind, Read, Write}, os::fd::AsFd, path::Path, sync::{Arc, Mutex}, thread::{self}, time::{Duration}};
+use std::{
+    collections::LinkedList,
+    io::{Cursor, ErrorKind, Read, Write},
+    os::fd::AsFd,
+    path::Path,
+    sync::{Arc, Mutex},
+    thread::{self},
+    time::Duration,
+};
 
 use clap::Parser;
-use dxkb_common::{__log::LevelFilter, bus::{BusPollError, BusRead, BusWrite}, dev_error, dev_info, dev_trace, time::{Clock, TimeDiff}};
-use dxkb_split_link::{LinkStatus, SplitBus, SplitLinkTimings};
+use dxkb_common::{
+    __log::LevelFilter,
+    bus::{BusPollError, BusRead, BusWrite},
+    dev_error, dev_info, dev_trace,
+    time::{Clock, TimeDiff},
+};
+use dxkb_split_link::{LinkStatus, SplitBus, SplitBusLike, SplitLinkTimings};
 use flexi_logger::writers::LogWriter;
-use nix::{poll::{PollFd, PollFlags, PollTimeout}, sys::time::TimeSpec, time::{clock_gettime, clock_nanosleep, ClockId, ClockNanosleepFlags}};
+use nix::{
+    poll::{PollFd, PollFlags, PollTimeout},
+    sys::time::TimeSpec,
+    time::{ClockId, ClockNanosleepFlags, clock_gettime, clock_nanosleep},
+};
 use rustyline::ExternalPrinter;
 use serde::{Deserialize, Serialize};
 use serial2::{CharSize, FlowControl, Parity, SerialPort, Settings, StopBits};
 
 #[derive(Clone, Copy)]
 struct LinuxMonotonicClockInstant {
-    nanos: u64
+    nanos: u64,
 }
 
 #[derive(Clone)]
@@ -28,7 +45,7 @@ impl Clock for LinuxMonotonicClock {
         let time = nix::time::clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap();
 
         LinuxMonotonicClockInstant {
-            nanos: (time.tv_sec() * 1_000_000_000 + time.tv_nsec()) as u64
+            nanos: (time.tv_sec() * 1_000_000_000 + time.tv_nsec()) as u64,
         }
     }
 
@@ -58,7 +75,7 @@ enum TransferMode {
     SendSampleMessage,
     JustReceive,
     SendFile,
-    ReceiveFile
+    ReceiveFile,
 }
 
 #[derive(Parser, Debug)]
@@ -70,22 +87,22 @@ struct Args {
     transfer_mode: TransferMode,
 
     #[clap(long)]
-    file: Option<String>
+    file: Option<String>,
 }
 
 struct RecvMsg {
     buf: [u8; 256],
-    len: usize
+    len: usize,
 }
 
 struct InnerSerialBus {
-    messages: LinkedList<RecvMsg>
+    messages: LinkedList<RecvMsg>,
 }
 
 #[derive(Clone)]
 struct SerialBus {
     inner: Arc<Mutex<InnerSerialBus>>,
-    serial: Arc<SerialPort>
+    serial: Arc<SerialPort>,
 }
 
 impl BusRead for SerialBus {
@@ -102,7 +119,7 @@ impl BusRead for SerialBus {
                     buf[0..msg.len].copy_from_slice(&msg.buf[0..msg.len]);
                     Ok(msg.len as u16)
                 }
-            },
+            }
             None => Err(BusPollError::WouldBlock),
         }
     }
@@ -120,7 +137,7 @@ impl BusWrite for SerialBus {
 }
 
 struct SerialTimings {
-    pub nanos_per_char: u64
+    pub nanos_per_char: u64,
 }
 
 impl SerialTimings {
@@ -130,17 +147,18 @@ impl SerialTimings {
         let stop_bits = settings.get_stop_bits().unwrap();
         let baud_rate = settings.get_baud_rate().unwrap();
 
-        let baud_per_char =
-            char_size.as_u8() + match parity {
+        let baud_per_char = char_size.as_u8()
+            + match parity {
                 Parity::None => 0,
                 Parity::Odd | Parity::Even => 1,
-            } + match stop_bits {
+            }
+            + match stop_bits {
                 StopBits::One => 1,
                 StopBits::Two => 2,
             };
 
         return SerialTimings {
-            nanos_per_char: (baud_per_char as u64 * 1_000_000_000u64) / baud_rate as u64
+            nanos_per_char: (baud_per_char as u64 * 1_000_000_000u64) / baud_rate as u64,
         };
     }
 }
@@ -151,7 +169,13 @@ fn park_nanos(nanos: u64) {
     let cur_time = clock_gettime(ClockId::CLOCK_MONOTONIC).unwrap();
 
     let tgt_time = cur_time + duration;
-    while clock_nanosleep(ClockId::CLOCK_MONOTONIC, ClockNanosleepFlags::TIMER_ABSTIME, &tgt_time).is_err() {}
+    while clock_nanosleep(
+        ClockId::CLOCK_MONOTONIC,
+        ClockNanosleepFlags::TIMER_ABSTIME,
+        &tgt_time,
+    )
+    .is_err()
+    {}
 }
 
 fn read_next_frame(port: &SerialPort, timings: &SerialTimings, buf: &mut [u8]) -> usize {
@@ -165,7 +189,11 @@ fn read_next_frame(port: &SerialPort, timings: &SerialTimings, buf: &mut [u8]) -
     let time_between_read = 3 * timings.nanos_per_char / 2; // Char time * 1.5
 
     dev_trace!("Waiting for first byte");
-    nix::poll::poll(&mut [PollFd::new(port.as_fd(), PollFlags::POLLIN)], PollTimeout::MAX).unwrap();
+    nix::poll::poll(
+        &mut [PollFd::new(port.as_fd(), PollFlags::POLLIN)],
+        PollTimeout::MAX,
+    )
+    .unwrap();
     dev_trace!("First byte got!");
 
     // When the first byte is got, wait the time that a char takes to
@@ -179,8 +207,8 @@ fn read_next_frame(port: &SerialPort, timings: &SerialTimings, buf: &mut [u8]) -
             Ok(got) => got,
             Err(e) if e.kind() != ErrorKind::TimedOut => {
                 panic!("Error reading: {e}");
-            },
-            _ => 0
+            }
+            _ => 0,
         };
         read += got;
         if got == 0 {
@@ -191,7 +219,6 @@ fn read_next_frame(port: &SerialPort, timings: &SerialTimings, buf: &mut [u8]) -
 
     return read;
 }
-
 
 fn discard_rx_bytes(port: &SerialPort) {
     let mut buf = [0u8; 1];
@@ -205,13 +232,21 @@ fn discard_rx_bytes(port: &SerialPort) {
 }
 
 struct RustyLogWriter<P: ExternalPrinter> {
-    printer: Arc<Mutex<P>>
+    printer: Arc<Mutex<P>>,
 }
 
 impl<P: ExternalPrinter + Send> LogWriter for RustyLogWriter<P> {
-    fn write(&self, now: &mut flexi_logger::DeferredNow, record: &log::Record) -> std::io::Result<()> {
+    fn write(
+        &self,
+        now: &mut flexi_logger::DeferredNow,
+        record: &log::Record,
+    ) -> std::io::Result<()> {
         let log_line = record.args().to_string();
-        self.printer.lock().unwrap().print(format!("{}\n", log_line)).unwrap();
+        self.printer
+            .lock()
+            .unwrap()
+            .print(format!("{}\n", log_line))
+            .unwrap();
         Ok(())
     }
 
@@ -245,7 +280,10 @@ struct TransferChunk {
     chunk_len: u8,
 }
 
-fn transfer_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut SplitBus<TransferChunk, TestingTimings, B, CS, 256>) {
+fn transfer_file<B: BusRead + BusWrite, CS: Clock>(
+    file_path: String,
+    link: &mut SplitBus<TransferChunk, TestingTimings, B, CS, 256>,
+) {
     let original_contents = std::fs::read(Path::new(&file_path)).unwrap();
     let total_length = original_contents.len();
     let mut contents = Cursor::new(original_contents);
@@ -253,10 +291,8 @@ fn transfer_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut
     let xfer_completed = false;
     let mut last_link_state = LinkStatus::Down;
     let mut last_chunk_len: u8 = 1;
-    let mut last_transfer_status_msg = (LinuxMonotonicClock{}).current_instant();
+    let mut last_transfer_status_msg = (LinuxMonotonicClock {}).current_instant();
     let mut transferred_length = 0;
-
-
 
     loop {
         link.poll(|m| {});
@@ -271,9 +307,11 @@ fn transfer_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut
                 None => {
                     let mut buf = [0u8; 32];
                     let count = contents.read(&mut buf).unwrap();
-                    next_chunk.insert(TransferChunk { chunk: buf, chunk_len: count as u8 })
-
-                },
+                    next_chunk.insert(TransferChunk {
+                        chunk: buf,
+                        chunk_len: count as u8,
+                    })
+                }
             };
             last_chunk_len = next_transfer.chunk_len;
 
@@ -288,20 +326,26 @@ fn transfer_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut
                 if let Ok(_) = link.transfer(next_transfer.clone()) {
                     transferred_length += next_transfer.chunk_len as usize;
                     next_chunk = None;
-                    if (LinuxMonotonicClock{}).elapsed_since(last_transfer_status_msg) > Duration::from_millis(500) {
-                        last_transfer_status_msg = LinuxMonotonicClock{}.current_instant();
-                        dev_info!("Total transferred: {} / {}", transferred_length, total_length);
+                    if (LinuxMonotonicClock {}).elapsed_since(last_transfer_status_msg)
+                        > Duration::from_millis(500)
+                    {
+                        last_transfer_status_msg = LinuxMonotonicClock {}.current_instant();
+                        dev_info!(
+                            "Total transferred: {} / {}",
+                            transferred_length,
+                            total_length
+                        );
                     }
                 }
             }
-
-
         }
-
     }
 }
 
-fn receive_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut SplitBus<TransferChunk, TestingTimings, B, CS, 256>) {
+fn receive_file<B: BusRead + BusWrite, CS: Clock>(
+    file_path: String,
+    link: &mut SplitBus<TransferChunk, TestingTimings, B, CS, 256>,
+) {
     let mut file = std::fs::File::create(file_path).unwrap();
     let completed_time: Option<CS::TInstant> = None;
 
@@ -310,12 +354,11 @@ fn receive_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut 
             if completed_time.is_none() {
                 if m.chunk_len == 0 {
                     todo!()
-//                    completed_time = Some(LinuxMonotonicClock{}.current_instant());
+                //                    completed_time = Some(LinuxMonotonicClock{}.current_instant());
                 } else {
                     file.write(&m.chunk[0..m.chunk_len as usize]).unwrap();
                 }
             }
-
         });
 
         if let Some(completed_time) = completed_time {
@@ -326,18 +369,14 @@ fn receive_file<B: BusRead + BusWrite, CS: Clock>(file_path: String, link: &mut 
             // }
 
             todo!()
-
         }
     }
 
     drop(file);
 }
 
-
 fn main() {
     //  main2();
-
-
 
     env_logger::builder()
         .filter_level(LevelFilter::Trace)
@@ -355,13 +394,13 @@ fn main() {
         settings.set_stop_bits(StopBits::One);
         settings.set_flow_control(FlowControl::None);
         Ok(settings)
-    }).unwrap();
+    })
+    .unwrap();
     port.set_read_timeout(Duration::ZERO).unwrap();
 
     let port = Arc::new(port);
     let timings = SerialTimings::from_config(&port.get_configuration().unwrap());
     // No timeout
-
 
     let serial_bus = SerialBus {
         serial: Arc::clone(&port),
@@ -389,7 +428,6 @@ fn main() {
 
     let mut last_sent_message = clock.current_instant();
 
-
     // match args.transfer_mode {
     //     TransferMode::SendSampleMessage => todo!(),
     //     TransferMode::JustReceive => todo!(),
@@ -403,16 +441,17 @@ fn main() {
     //     },
     // }
 
-
-    let mut split_bus: SplitBus<u8, TestingTimings, _, _, 256> = SplitBus::new(serial_bus.clone(), clock.clone());
+    let mut split_bus: SplitBus<u8, TestingTimings, _, _, 256> =
+        SplitBus::new(serial_bus.clone(), clock.clone());
     let mut next = 0;
     dev_info!("Start polling serial");
     loop {
-        split_bus.poll(|m| {
-            dev_info!("Received message: {}", *m)
-        });
+        split_bus.poll(|m| dev_info!("Received message: {}", *m));
 
-        if is_sender && split_bus.link_status() == LinkStatus::Up && clock.elapsed_since(last_sent_message) > Duration::from_millis(50) {
+        if is_sender
+            && split_bus.link_status() == LinkStatus::Up
+            && clock.elapsed_since(last_sent_message) > Duration::from_millis(50)
+        {
             dev_info!("Sample message was sent");
             split_bus.transfer(next).unwrap();
             next += 1;

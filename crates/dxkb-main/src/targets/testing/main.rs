@@ -34,12 +34,19 @@ use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, UartDmaRb};
 use dxkb_split_link::{SplitBus, TestingTimings};
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::{Output, Pin};
-use stm32f4xx_hal::pac::{Interrupt, DMA2};
-use stm32f4xx_hal::{dma::StreamsTuple, interrupt, otg_fs::USB, pac::{self, DWT, NVIC, OTG_FS_DEVICE}, prelude::*, rcc::RccExt};
+use stm32f4xx_hal::pac::{DMA2, Interrupt};
+use stm32f4xx_hal::{
+    dma::StreamsTuple,
+    interrupt,
+    otg_fs::USB,
+    pac::{self, DWT, NVIC, OTG_FS_DEVICE},
+    prelude::*,
+    rcc::RccExt,
+};
 use synopsys_usb_otg::UsbBus;
 use usb_device::{
-    device::{StringDescriptors, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
     LangID,
+    device::{StringDescriptors, UsbDeviceBuilder, UsbDeviceState, UsbVidPid},
 };
 use usbd_hid::descriptor::KeyboardUsage;
 use usbd_hid::{
@@ -54,10 +61,9 @@ type UartBus = UartDmaRb<pac::USART1, Stream7<DMA2>, Stream5<DMA2>, 4, 4, 256, 1
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 static mut SPLIT_BUS_BUF: DmaRingBuffer<256, 128> = DmaRingBuffer::new();
 static mut DMA_UART_TX_BUF: [u8; 256] = [0u8; 256];
-static mut SPLIT_BUS: MaybeUninit<SplitBus<u8, TestingTimings, UartBus, DWTClock,  32>> = MaybeUninit::uninit();
-static mut INTR_PIN: Pin<'B', 8, Output> = unsafe {
-    core::mem::zeroed()
-};
+static mut SPLIT_BUS: MaybeUninit<SplitBus<u8, TestingTimings, UartBus, DWTClock, 32>> =
+    MaybeUninit::uninit();
+static mut INTR_PIN: Pin<'B', 8, Output> = unsafe { core::mem::zeroed() };
 
 #[entry]
 fn main() -> ! {
@@ -83,10 +89,7 @@ fn main0() -> ! {
     let gpiob = dp.GPIOB.split();
     let gpioc = dp.GPIOC.split();
 
-
-
     let mut suspend_led = gpioc.pc13.into_push_pull_output();
-
 
     itm_logger::init_with_level(log::Level::Trace).unwrap();
     dev_info!("Device startup");
@@ -102,7 +105,8 @@ fn main0() -> ! {
         gpioa.pa2.into_input(),
         gpioa.pa3.into_input(),
         gpioa.pa4.into_input(),
-    ).into_input_pins_with_same_port();
+    )
+        .into_input_pins_with_same_port();
 
     let cols = (
         gpioa.pa5.into_push_pull_output(),
@@ -135,9 +139,7 @@ fn main0() -> ! {
     let tx = gpiob.pb6.into_alternate();
 
     let dma2 = StreamsTuple::new(dp.DMA2);
-    let dma2_2 = StreamsTuple::new(unsafe {
-        DMA2::steal()
-    });
+    let dma2_2 = StreamsTuple::new(unsafe { DMA2::steal() });
 
     //SplitBus::init(dp.USART2, todo!(), dma2.7, dma2.5, &clocks);
     // Worked with 2995200 baud
@@ -152,13 +154,9 @@ fn main0() -> ! {
     //     &clocks).unwrap();
 
     unsafe {
-//        NVIC::unmask(Interrupt::DMA2_STREAM7);
-//        NVIC::unmask(Interrupt::DMA2_STREAM4);
+        //        NVIC::unmask(Interrupt::DMA2_STREAM7);
+        //        NVIC::unmask(Interrupt::DMA2_STREAM4);
     }
-
-
-
-
 
     // loop {
     //     let mut last_ndr = 999;
@@ -178,7 +176,6 @@ fn main0() -> ! {
     //     usart_dma.handle_dma_interrupt();
     // }
 
-
     let bus_allocator = UsbBus::new(usb, unsafe { addr_of_mut!(EP_MEMORY).as_mut().unwrap() });
 
     // TODO NKRO support
@@ -188,7 +185,11 @@ fn main0() -> ! {
 
     // TODO Make USART NVIC interrupts a priority in which they cannot be preempted by any other interrupt.
 
-    const NZXT_HUE2_DESCRIPTOR: [u8; 34] = [0x06, 0x72, 0xFF, 0x09, 0xA1, 0xA1, 0x01, 0x09, 0x10, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x40, 0x81, 0x02, 0x09, 0x11, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x40, 0x91, 0x02, 0xC0];
+    const NZXT_HUE2_DESCRIPTOR: [u8; 34] = [
+        0x06, 0x72, 0xFF, 0x09, 0xA1, 0xA1, 0x01, 0x09, 0x10, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75,
+        0x08, 0x95, 0x40, 0x81, 0x02, 0x09, 0x11, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95,
+        0x40, 0x91, 0x02, 0xC0,
+    ];
     let mut kbd_hid = HIDClass::new_ep_in_with_settings(
         &bus_allocator,
         &NZXT_HUE2_DESCRIPTOR,
@@ -218,7 +219,15 @@ fn main0() -> ! {
 
     let mut last_led_change_ticks = DWT::cycle_count();
 
-    let uart_dma = UartDmaRb::init(dp.USART1, (tx, rx), dma2.7, dma2.5, unsafe{ &mut DMA_UART_TX_BUF }, unsafe { &mut SPLIT_BUS_BUF }, &clocks);
+    let uart_dma = UartDmaRb::init(
+        dp.USART1,
+        (tx, rx),
+        dma2.7,
+        dma2.5,
+        unsafe { &mut DMA_UART_TX_BUF },
+        unsafe { &mut SPLIT_BUS_BUF },
+        &clocks,
+    );
 
     let clock = DWTClock::new(&clocks, &mut cortex.DCB, &mut cortex.DWT);
 
@@ -226,11 +235,9 @@ fn main0() -> ! {
         INTR_PIN = gpiob.pb8.into_push_pull_output();
         INTR_PIN.set_high();
 
-        let sb = SPLIT_BUS.write(SplitBus::new(uart_dma,
-            clock.clone()
-        ));
+        let sb = SPLIT_BUS.write(SplitBus::new(uart_dma, clock.clone()));
 
-//        NVIC::unmask(Interrupt::USART1);
+        //        NVIC::unmask(Interrupt::USART1);
         sb
     };
 
@@ -242,7 +249,6 @@ fn main0() -> ! {
         //     dev_info!("Received frame: {:?}", frame);
         // });
 
-
         // let cur_usb_status = Some(usb_dev.state());
         // if prev_usb_status != cur_usb_status {
         //     dev_info!("USB device status changed to {:?}; Remote wakeup? {}", usb_dev.state(), usb_dev.remote_wakeup_enabled());
@@ -252,7 +258,6 @@ fn main0() -> ! {
         if usb_dev.poll(&mut [&mut kbd_hid]) {
             let mut report_buf = [0u8; 64];
             if let Ok(_report) = kbd_hid.pull_raw_report(&mut report_buf) {
-
                 let _ = kbd_hid.push_raw_input(&report_buf).unwrap();
             }
         }
@@ -328,9 +333,7 @@ fn USART1() {
         );
         INTR_PIN.set_high();
     }
-    let split_bus = unsafe {
-        SPLIT_BUS.assume_init_mut()
-    };
+    let split_bus = unsafe { SPLIT_BUS.assume_init_mut() };
 
     split_bus.bus().handle_usart_intr();
     unsafe {
@@ -352,5 +355,4 @@ fn USART1() {
         );
         INTR_PIN.set_high();
     }
-
 }

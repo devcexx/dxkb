@@ -48,13 +48,13 @@ use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::time::Duration;
 use crc::Table;
+use dxkb_common::bus::{BusPollError, BusRead, BusTransferError, BusWrite};
 use dxkb_common::time::Clock;
+use dxkb_common::{dev_debug, dev_info, dev_trace, dev_warn};
 use heapless::Vec;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use dxkb_common::bus::{BusPollError, BusRead, BusTransferError, BusWrite};
-use dxkb_common::{dev_debug, dev_info, dev_trace, dev_warn};
 
 pub trait SplitLinkTimings {
     /// The max time that can happen between successfully received frames
@@ -86,7 +86,6 @@ impl SplitLinkTimings for DefaultSplitLinkTimings {
     const MSG_REPLAY_DELAY_TIME: Duration = Duration::from_millis(500);
 }
 
-
 pub struct TestingTimings {}
 impl SplitLinkTimings for TestingTimings {
     const MAX_LINK_IDLE_TIME: Duration = Duration::from_secs(10);
@@ -94,7 +93,6 @@ impl SplitLinkTimings for TestingTimings {
     const MAX_SYNC_ACK_WAIT_TIME: Duration = Duration::from_secs(5);
     const MSG_REPLAY_DELAY_TIME: Duration = Duration::from_millis(200);
 }
-
 
 const SPLIT_BUS_CRC: crc::Crc<u8, Table<1>> = crc::Crc::<u8, Table<1>>::new(&crc::CRC_8_SMBUS);
 const FRAME_PRELUDE_BYTE: u8 = 0x99;
@@ -122,7 +120,7 @@ pub struct Frame<M> {
 #[repr(C)]
 pub struct FrameContentEnvelope<M> {
     seq: u8,
-    content: FrameContent<M>
+    content: FrameContent<M>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -132,28 +130,25 @@ pub enum FrameContent<M> {
     Ack,
     SyncAck,
     Sync,
-    TransportMessage(M)
+    TransportMessage(M),
 }
 
 #[derive(Debug)]
 pub enum FrameDecodeError {
     PreludeError,
     CrcError,
-    SerdeError(ssmarshal::Error)
+    SerdeError(ssmarshal::Error),
 }
 
 #[derive(Debug)]
 pub enum TransferError {
-    BufferOverflow
+    BufferOverflow,
 }
 
 impl<M> FrameContentEnvelope<M> {
     #[inline(always)]
     pub const fn new(seq: u8, content: FrameContent<M>) -> Self {
-        Self {
-            seq,
-            content
-        }
+        Self { seq, content }
     }
 
     #[inline(always)]
@@ -162,7 +157,10 @@ impl<M> FrameContentEnvelope<M> {
             // SAFETY: slice length matches size of the input
             // envelop. Returned reference has the same lifetime
             // as the envelope lifetime.
-            core::slice::from_raw_parts(self as *const FrameContentEnvelope<M> as *const u8, size_of::<FrameContentEnvelope<M>>())
+            core::slice::from_raw_parts(
+                self as *const FrameContentEnvelope<M> as *const u8,
+                size_of::<FrameContentEnvelope<M>>(),
+            )
         };
         dev_info!("CRC calculation of {:?}", self_bytes);
         SPLIT_BUS_CRC.checksum(self_bytes)
@@ -170,10 +168,12 @@ impl<M> FrameContentEnvelope<M> {
 
     #[inline(always)]
     pub fn into_frame(self) -> Frame<M> {
-        Frame { crc: self.crc8(), envelope: self }
+        Frame {
+            crc: self.crc8(),
+            envelope: self,
+        }
     }
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkStatus {
@@ -182,18 +182,21 @@ pub enum LinkStatus {
 
     /// A Sync packet has been sent and waiting for the first ACK.
     Sync, // TODO Add a timestamp here to indicate when the last
-          // status changed, so that we can timeout the link status
-          // change.
-
+    // status changed, so that we can timeout the link status
+    // change.
     /// The link has been sync'ed and is ready to transmit or receive frames.
-    Up
+    Up,
 }
 
 pub trait SplitBusLike<Msg: Clone + Debug> {
     fn poll<F: FnMut(&Msg) -> bool>(&mut self, recvf: F);
 
     #[inline]
-    fn poll_max<F: FnMut(&Msg, usize) -> ()>(&mut self, max_msg_count: usize, mut recvf: F) -> usize {
+    fn poll_max<F: FnMut(&Msg, usize) -> ()>(
+        &mut self,
+        max_msg_count: usize,
+        mut recvf: F,
+    ) -> usize {
         let mut received = max_msg_count;
         self.poll(|msg| {
             recvf(msg, received);
@@ -207,13 +210,19 @@ pub trait SplitBusLike<Msg: Clone + Debug> {
     #[inline]
     fn poll_into_vec<const MAX: usize>(&mut self, buf: &mut Vec<Msg, MAX>) -> usize {
         self.poll_max(MAX, |msg, offset| {
-            buf[offset] = msg.clone();
+            buf.push(msg.clone()).unwrap();
         })
     }
     fn transfer(&mut self, message: Msg) -> Result<(), TransferError>;
 }
 
-pub struct SplitBus<Msg, Ts: SplitLinkTimings, B: BusWrite + BusRead, CS: Clock, const TX_QUEUE_LEN: usize> {
+pub struct SplitBus<
+    Msg,
+    Ts: SplitLinkTimings,
+    B: BusWrite + BusRead,
+    CS: Clock,
+    const TX_QUEUE_LEN: usize,
+> {
     bus: B,
     clock: CS,
     link_status: LinkStatus,
@@ -248,20 +257,32 @@ pub struct SplitBus<Msg, Ts: SplitLinkTimings, B: BusWrite + BusRead, CS: Clock,
     control_tx_queue: ConstGenericRingBuffer<FrameContentEnvelope<NoMsg>, TX_QUEUE_LEN>,
     user_tx_queue: ConstGenericRingBuffer<Msg, TX_QUEUE_LEN>,
     _msg: PhantomData<Msg>,
-    _timings: PhantomData<Ts>
+    _timings: PhantomData<Ts>,
 }
 
 pub struct MaxFrameLength<Msg> {
-    _msg: PhantomData<Msg>
+    _msg: PhantomData<Msg>,
 }
 
-impl<Msg> MaxFrameLength<Msg> where Msg: Sized {
+impl<Msg> MaxFrameLength<Msg>
+where
+    Msg: Sized,
+{
     const MAX_FRAME_LENGTH: usize = size_of::<Frame<Msg>>() + 1; // Max frame length plus the preamble byte.
 }
 
 // TODO Refactor code so that the code is based on the status of the link (like a state machine with actions on each transition and all that). (E.g move the code to an impl LinkStatus).
-impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B: BusWrite + BusRead, CS: Clock, const TX_QUEUE_LEN: usize> SplitBus<Msg, Ts, B, CS, TX_QUEUE_LEN> where [(); MaxFrameLength::<Msg>::MAX_FRAME_LENGTH]:, [(); MaxFrameLength::<NoMsg>::MAX_FRAME_LENGTH]: {
-
+impl<
+    Msg: Clone + Debug + DeserializeOwned + Serialize,
+    Ts: SplitLinkTimings,
+    B: BusWrite + BusRead,
+    CS: Clock,
+    const TX_QUEUE_LEN: usize,
+> SplitBus<Msg, Ts, B, CS, TX_QUEUE_LEN>
+where
+    [(); MaxFrameLength::<Msg>::MAX_FRAME_LENGTH]:,
+    [(); MaxFrameLength::<NoMsg>::MAX_FRAME_LENGTH]:,
+{
     pub fn new(bus: B, clock: CS) -> Self {
         let cur = clock.current_instant();
 
@@ -278,18 +299,19 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
             control_tx_queue: ConstGenericRingBuffer::new(),
             user_tx_queue: ConstGenericRingBuffer::new(),
             _msg: PhantomData,
-            _timings: PhantomData
+            _timings: PhantomData,
         }
     }
 
     fn crc8(buf: &[u8]) -> u8 {
         let crc = SPLIT_BUS_CRC.checksum(&buf);
         dev_trace!("CRC for {:x?} = {:x}", &buf, crc);
-        return crc
+        return crc;
     }
 
     fn decode_frame(buf: &[u8]) -> Result<Frame<Msg>, FrameDecodeError> {
-        if buf.len() < 4 { // Min bytes are Preamble, CRC, Seq and Frame Type
+        if buf.len() < 4 {
+            // Min bytes are Preamble, CRC, Seq and Frame Type
             // Reusing the EOF error already defined in ssmarshal.
             return Err(FrameDecodeError::SerdeError(ssmarshal::Error::EndOfStream));
         }
@@ -300,7 +322,9 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
 
         let crc = buf[1];
         let envelope_bytes = &buf[2..];
-        let (envelope, read_bytes) = ssmarshal::deserialize::<FrameContentEnvelope<Msg>>(envelope_bytes).map_err(|e| FrameDecodeError::SerdeError(e))?;
+        let (envelope, read_bytes) =
+            ssmarshal::deserialize::<FrameContentEnvelope<Msg>>(envelope_bytes)
+                .map_err(|e| FrameDecodeError::SerdeError(e))?;
         let expected_crc = Self::crc8(&envelope_bytes[0..read_bytes]);
 
         if crc != expected_crc {
@@ -339,7 +363,11 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
         // - Up -> Down: When something wrong happens in the link and it goes down.
 
         if self.link_status != new_state {
-            dev_info!("Link state changed {:?} => {:?}", self.link_status, new_state);
+            dev_info!(
+                "Link state changed {:?} => {:?}",
+                self.link_status,
+                new_state
+            );
             self.last_link_status_change_time = self.clock.current_instant();
             self.link_status = new_state;
 
@@ -370,7 +398,11 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
     /// be always true unless the next frame type is a message, in
     /// which case, the function provided is executed, and its result
     /// is used as result for this function.
-    fn handle_rx_frame<F: FnMut(&Msg) -> bool>(&mut self, frame: &Frame<Msg>, recvf: &mut F) -> bool {
+    fn handle_rx_frame<F: FnMut(&Msg) -> bool>(
+        &mut self,
+        frame: &Frame<Msg>,
+        recvf: &mut F,
+    ) -> bool {
         match frame.envelope.content {
             FrameContent::LinkProbe => {
                 // There's nothing to do with this frame, unless the
@@ -381,24 +413,32 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
                     self.change_link_state(LinkStatus::Sync);
                     self.push_control_frame(FrameContentEnvelope::new(0, FrameContent::Sync));
                 }
-            },
+            }
 
             FrameContent::Ack => {
-
                 // TODO Maybe I should put here a counter of
                 // unexpected ACKs received, and when the number is
                 // quite big (20?), give up and set the link down, to force
                 // a new resync.
                 let diff = seq_diff(frame.envelope.seq, self.tx_seq);
                 if diff < 0 {
-                    dev_warn!("Received duplicated ACK for seq number {}", frame.envelope.seq);
+                    dev_warn!(
+                        "Received duplicated ACK for seq number {}",
+                        frame.envelope.seq
+                    );
                 } else {
                     if diff != 0 {
-                        dev_warn!("TX seq number increased unexpectedly by remoted peer by {}.", diff);
+                        dev_warn!(
+                            "TX seq number increased unexpectedly by remoted peer by {}.",
+                            diff
+                        );
                     }
 
                     if self.user_msg_pending_ack_sent_time.is_some() {
-                        dev_debug!("Successfully ACK'ed message with seq: {}", frame.envelope.seq);
+                        dev_debug!(
+                            "Successfully ACK'ed message with seq: {}",
+                            frame.envelope.seq
+                        );
                         self.user_msg_pending_ack_sent_time = None;
                         let _ = self.user_tx_queue.dequeue();
                     } else {
@@ -407,7 +447,7 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
 
                     self.tx_seq = frame.envelope.seq.wrapping_add(1);
                 }
-            },
+            }
             FrameContent::SyncAck => {
                 // This only should be received when our link is in
                 // sync state, and confirms that the peer has resetted
@@ -420,7 +460,7 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
                 } else {
                     dev_debug!("Received unsolicitated SyncACK. Ignoring.");
                 }
-            },
+            }
             FrameContent::Sync => {
                 // A sync can happen on any of the different link states:
                 //
@@ -444,7 +484,7 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
                 self.change_link_state(LinkStatus::Up);
                 self.reset_sequence_numbers();
                 self.push_control_frame(FrameContentEnvelope::new(0, FrameContent::SyncAck));
-            },
+            }
             FrameContent::TransportMessage(ref msg) => {
                 if self.link_status == LinkStatus::Up {
                     let diff = seq_diff(frame.envelope.seq, self.rx_seq);
@@ -462,14 +502,21 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
                     // so it is important to send it again.
                     self.push_control_frame(FrameContentEnvelope {
                         seq: frame.envelope.seq,
-                        content: FrameContent::Ack
+                        content: FrameContent::Ack,
                     });
 
                     if diff < 0 {
-                        dev_debug!("Dropping possibly duplicated frame. Expecting seq {} but {} found", self.rx_seq, frame.envelope.seq);
+                        dev_debug!(
+                            "Dropping possibly duplicated frame. Expecting seq {} but {} found",
+                            self.rx_seq,
+                            frame.envelope.seq
+                        );
                     } else {
                         if diff != 0 {
-                            dev_debug!("RX seq number increased unexpectedly by remoted peer by {}.", diff);
+                            dev_debug!(
+                                "RX seq number increased unexpectedly by remoted peer by {}.",
+                                diff
+                            );
                         }
 
                         self.rx_seq = frame.envelope.seq.wrapping_add(1);
@@ -477,16 +524,18 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
                         return recvf(msg);
                     }
                 } else {
-                    dev_debug!("Received transport frame when link status was not Up. Silently discarding frame");
+                    dev_debug!(
+                        "Received transport frame when link status was not Up. Silently discarding frame"
+                    );
                 }
-            },
+            }
         }
 
         true
     }
 
     fn do_rx<F: FnMut(&Msg) -> bool>(&mut self, mut recvf: F) {
-        let mut rxbuf = [0u8; {MaxFrameLength::<Msg>::MAX_FRAME_LENGTH}];
+        let mut rxbuf = [0u8; { MaxFrameLength::<Msg>::MAX_FRAME_LENGTH }];
         while {
             let should_continue = match self.bus.poll_next(&mut rxbuf) {
                 Ok(frame_len) => {
@@ -495,21 +544,21 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
                         Ok(frame) => {
                             self.last_recv_frame_time = self.clock.current_instant();
                             self.handle_rx_frame(&frame, &mut recvf)
-                        },
+                        }
                         Err(FrameDecodeError::PreludeError) => {
                             dev_debug!("Invalid prelude in frame. Dropping frame");
                             true
-                        },
+                        }
                         Err(FrameDecodeError::CrcError) => {
                             dev_debug!("Invalid frame CRC. Dropping frame");
                             true
-                        },
+                        }
                         Err(e @ FrameDecodeError::SerdeError(_)) => {
                             dev_debug!("Failed to parse frame: {:?}", e);
                             true
                         }
                     }
-                },
+                }
                 Err(BusPollError::BufferOverflow) => true,
                 Err(BusPollError::WouldBlock) => false,
             };
@@ -525,8 +574,16 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
         encoded_len + 2
     }
 
-    fn transfer_frame<M: Serialize + Debug>(bus: &mut B, clock: &CS, last_sent_frame_time: &mut CS::TInstant, frame: &FrameContentEnvelope<M>) -> Result<(), BusTransferError> where [(); MaxFrameLength::<M>::MAX_FRAME_LENGTH]: {
-        let mut txbuf = [0u8; {MaxFrameLength::<M>::MAX_FRAME_LENGTH}];
+    fn transfer_frame<M: Serialize + Debug>(
+        bus: &mut B,
+        clock: &CS,
+        last_sent_frame_time: &mut CS::TInstant,
+        frame: &FrameContentEnvelope<M>,
+    ) -> Result<(), BusTransferError>
+    where
+        [(); MaxFrameLength::<M>::MAX_FRAME_LENGTH]:,
+    {
+        let mut txbuf = [0u8; { MaxFrameLength::<M>::MAX_FRAME_LENGTH }];
         let len = Self::encode_frame(&mut txbuf, frame);
         let res = bus.transfer(&mut txbuf[0..len]);
         if matches!(res, Ok(_)) {
@@ -546,7 +603,15 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
 
     fn transfer_next_user_msg(&mut self) {
         if let Some(next_frame) = self.user_tx_queue.peek() {
-            if let Ok(_) = Self::transfer_frame(&mut self.bus, &self.clock, &mut self.last_sent_frame_time, &FrameContentEnvelope { seq: self.tx_seq, content: FrameContent::TransportMessage(next_frame.clone()) }) {
+            if let Ok(_) = Self::transfer_frame(
+                &mut self.bus,
+                &self.clock,
+                &mut self.last_sent_frame_time,
+                &FrameContentEnvelope {
+                    seq: self.tx_seq,
+                    content: FrameContent::TransportMessage(next_frame.clone()),
+                },
+            ) {
                 self.user_msg_pending_ack_sent_time = Some(self.clock.current_instant());
             }
         }
@@ -555,7 +620,12 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
     fn do_tx(&mut self) {
         if !self.bus.is_tx_busy() {
             if let Some(control_frame) = self.control_tx_queue.peek() {
-                if let Ok(_) = Self::transfer_frame::<NoMsg>(&mut self.bus, &self.clock, &mut self.last_sent_frame_time, control_frame) {
+                if let Ok(_) = Self::transfer_frame::<NoMsg>(
+                    &mut self.bus,
+                    &self.clock,
+                    &mut self.last_sent_frame_time,
+                    control_frame,
+                ) {
                     self.control_tx_queue.dequeue();
                 }
             }
@@ -566,20 +636,28 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
         //  - The bus is not busy
         //  - No other priority control message is scheduled for transfer.
         //  - There's no message pending to be ACK'ed. Replying that message is part of the job of do_timed_actions.
-        if self.link_status == LinkStatus::Up && !self.bus.is_tx_busy() && self.control_tx_queue.is_empty() && self.user_msg_pending_ack_sent_time.is_none() {
+        if self.link_status == LinkStatus::Up
+            && !self.bus.is_tx_busy()
+            && self.control_tx_queue.is_empty()
+            && self.user_msg_pending_ack_sent_time.is_none()
+        {
             self.transfer_next_user_msg();
         }
     }
 
     fn do_timed_actions(&mut self) {
-        if self.clock.elapsed_since(self.last_sent_frame_time) >= Ts::LINK_IDLE_PROBE_INTERVAL_TIME {
+        if self.clock.elapsed_since(self.last_sent_frame_time) >= Ts::LINK_IDLE_PROBE_INTERVAL_TIME
+        {
             // TODO We need to do something about probes:
             // - If we stop sending probes when we receive normal frames, we need to trigger link sync everytime we receive a valid frame.
             // - Either that, or we keep sending link probes indefinitely. I prefer the first option just to save some bandwidth
             self.push_control_frame(FrameContentEnvelope::new(0, FrameContent::LinkProbe));
         }
 
-        if self.link_status == LinkStatus::Sync && self.clock.elapsed_since(self.last_link_status_change_time) >= Ts::MAX_SYNC_ACK_WAIT_TIME {
+        if self.link_status == LinkStatus::Sync
+            && self.clock.elapsed_since(self.last_link_status_change_time)
+                >= Ts::MAX_SYNC_ACK_WAIT_TIME
+        {
             dev_warn!("Couldn't receive a SyncACK frame in time. Giving up link synchronization");
             self.change_link_state(LinkStatus::Down);
         }
@@ -589,7 +667,9 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
                 dev_warn!("Link has been idle for so long. Considering it down");
                 self.change_link_state(LinkStatus::Down);
             } else if let Some(last_replay_time) = self.user_msg_pending_ack_sent_time {
-                if !self.bus.is_tx_busy() && self.clock.elapsed_since(last_replay_time) > Ts::MSG_REPLAY_DELAY_TIME {
+                if !self.bus.is_tx_busy()
+                    && self.clock.elapsed_since(last_replay_time) > Ts::MSG_REPLAY_DELAY_TIME
+                {
                     dev_debug!("Re-sent user message for which no ACK has been received");
                     self.transfer_next_user_msg();
                 }
@@ -600,10 +680,19 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
     pub fn user_tx_queue_len(&self) -> usize {
         self.user_tx_queue.len()
     }
-
 }
 
-impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B: BusWrite + BusRead, CS: Clock, const TX_QUEUE_LEN: usize> SplitBusLike<Msg> for SplitBus<Msg, Ts, B, CS, TX_QUEUE_LEN> where [(); MaxFrameLength::<Msg>::MAX_FRAME_LENGTH]:, [(); MaxFrameLength::<NoMsg>::MAX_FRAME_LENGTH]: {
+impl<
+    Msg: Clone + Debug + DeserializeOwned + Serialize,
+    Ts: SplitLinkTimings,
+    B: BusWrite + BusRead,
+    CS: Clock,
+    const TX_QUEUE_LEN: usize,
+> SplitBusLike<Msg> for SplitBus<Msg, Ts, B, CS, TX_QUEUE_LEN>
+where
+    [(); MaxFrameLength::<Msg>::MAX_FRAME_LENGTH]:,
+    [(); MaxFrameLength::<NoMsg>::MAX_FRAME_LENGTH]:,
+{
     fn poll<F: FnMut(&Msg) -> bool>(&mut self, recvf: F) {
         self.do_rx(recvf);
         self.do_timed_actions();
@@ -615,7 +704,7 @@ impl<Msg: Clone + Debug + DeserializeOwned + Serialize, Ts: SplitLinkTimings, B:
             return Err(TransferError::BufferOverflow);
         } else {
             self.user_tx_queue.push(message);
-            return Ok(())
+            return Ok(());
         }
     }
 }

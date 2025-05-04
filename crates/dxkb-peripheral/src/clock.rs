@@ -1,8 +1,15 @@
 use core::time::Duration;
 
-use dxkb_common::{dev_info, time::{Clock, TimeDiff}};
+use dxkb_common::{
+    dev_info,
+    time::{Clock, TimeDiff},
+};
 use enumflags2::BitFlags;
-use stm32f4xx_hal::{pac::{DCB, DWT}, rcc::Clocks, timer::{Event, Instance}};
+use stm32f4xx_hal::{
+    pac::{DCB, DWT},
+    rcc::Clocks,
+    timer::{Event, Instance},
+};
 use vcell::VolatileCell;
 
 pub struct TIMClock<TIM: Instance> {
@@ -43,14 +50,17 @@ impl<TIM: Instance<Width = u32>> TIMClock<TIM> {
         tim.enable_counter(true);
         tim.trigger_update();
 
-        dev_info!("TIM Clock started with a resolution of {} nanos per tick. Prescaler: {}", nanos_per_tick, tim_psc);
+        dev_info!(
+            "TIM Clock started with a resolution of {} nanos per tick. Prescaler: {}",
+            nanos_per_tick,
+            tim_psc
+        );
 
         Self {
             uptime_hibits: VolatileCell::new(0),
             timer: tim,
         }
     }
-
 
     pub fn get_time(&self) -> u64 {
         // It is hard
@@ -60,14 +70,12 @@ impl<TIM: Instance<Width = u32>> TIMClock<TIM> {
     #[inline(always)]
     pub fn handle_intr(&mut self) {
         todo!()
-
     }
 }
 
-
 #[derive(Clone)]
 pub struct DWTClock {
-    clock_freq: u32
+    clock_freq: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -81,7 +89,7 @@ impl DWTClock {
         dwt.enable_cycle_counter();
 
         Self {
-            clock_freq: clocks.sysclk().raw()
+            clock_freq: clocks.sysclk().raw(),
         }
     }
 

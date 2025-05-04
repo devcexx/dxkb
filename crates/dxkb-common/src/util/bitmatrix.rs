@@ -12,7 +12,6 @@ pub trait BitMatrixLayout {
 }
 pub struct ColBitMatrixLayout<const COLS: u8> {}
 
-
 #[crabtime::function]
 fn gen_bit_matrix_layout_impls() {
     for bits in 1..=128 {
@@ -21,7 +20,7 @@ fn gen_bit_matrix_layout_impls() {
             9..=16 => "u16",
             17..=32 => "u32",
             33..=64 => "u64",
-            _ => "u128"
+            _ => "u128",
         };
 
         crabtime::output! {
@@ -53,14 +52,20 @@ fn gen_bit_matrix_layout_impls() {
 gen_bit_matrix_layout_impls!();
 
 #[derive(Debug)]
-pub struct BitMatrix<const ROWS: usize, const COLS: u8> where ColBitMatrixLayout<COLS>: BitMatrixLayout {
-    buf: [<ColBitMatrixLayout<COLS> as BitMatrixLayout>::ColType; ROWS]
+pub struct BitMatrix<const ROWS: usize, const COLS: u8>
+where
+    ColBitMatrixLayout<COLS>: BitMatrixLayout,
+{
+    buf: [<ColBitMatrixLayout<COLS> as BitMatrixLayout>::ColType; ROWS],
 }
 
-impl<const ROWS: usize, const COLS: u8> BitMatrix<ROWS, COLS> where ColBitMatrixLayout<COLS>: BitMatrixLayout {
+impl<const ROWS: usize, const COLS: u8> BitMatrix<ROWS, COLS>
+where
+    ColBitMatrixLayout<COLS>: BitMatrixLayout,
+{
     pub const fn new() -> Self {
         Self {
-            buf: [ColBitMatrixLayout::<COLS>::ZERO; ROWS]
+            buf: [ColBitMatrixLayout::<COLS>::ZERO; ROWS],
         }
     }
 

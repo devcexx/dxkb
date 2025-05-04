@@ -1,12 +1,12 @@
 #[derive(Debug)]
 pub enum BusPollError {
     WouldBlock,
-    BufferOverflow
+    BufferOverflow,
 }
 
 #[derive(Debug)]
 pub enum BusTransferError {
-    WouldBlock
+    WouldBlock,
 }
 
 pub trait BusWrite {

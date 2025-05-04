@@ -1,5 +1,3 @@
-
-
 // pub struct RustyLineLog<P: ExternalPrinter> {
 //     level: Level,
 //     printer: Arc<Mutex<P>>

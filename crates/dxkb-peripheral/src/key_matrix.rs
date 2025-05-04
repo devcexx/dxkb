@@ -1,7 +1,7 @@
 use core::{
     arch::asm,
     marker::PhantomData,
-    sync::atomic::{fence, Ordering},
+    sync::atomic::{Ordering, fence},
 };
 
 use cortex_m::peripheral::DWT;
@@ -10,7 +10,10 @@ use stm32f4xx_hal::{
     time::Hertz,
 };
 
-use dxkb_common::{dev_info, dev_trace, util::{BitMatrix, BitMatrixLayout, ColBitMatrixLayout}, KeyState};
+use dxkb_common::{
+    KeyState, dev_info, dev_trace,
+    util::{BitMatrix, BitMatrixLayout, ColBitMatrixLayout},
+};
 
 use super::gpio::{GpioPort, GpioX};
 
@@ -137,16 +140,16 @@ macro_rules! input_pins_same_port_impl {
 }
 
 // Implement [`OutputPins`] for different number of pins.
-output_pins_impl!(2, 3, 4);
+output_pins_impl!(2, 3, 4, 5);
 
 // Implement [`IntoInputPinsWithSamePort`] for different
 // number of pins. This allows converting a tuple of pins into [`PinsWithSamePort<T>`],
 // so that all pins can be read at once from a single register.
-into_pins_with_same_port_impl!(2, 3, 4);
+into_pins_with_same_port_impl!(2, 3, 4, 5);
 
 // Implement [`InputPins`] for different number of pins, that are
 // located at the same GPIO port.
-input_pins_same_port_impl!(2, 3, 4);
+input_pins_same_port_impl!(2, 3, 4, 5);
 
 /// Holds the result of reading a GPIO register that holds the input
 /// value of multiple pins, defined by the type T.
@@ -331,8 +334,7 @@ where
 /// in which the matrix should be scanned according to the type that
 /// conforms to this trait. See [`ColumnScan`] and [`RowScan`] for
 /// more info.
-pub trait MatrixScan<const ROWS: u8, const COLS: u8, RowPins, ColPins>
-{
+pub trait MatrixScan<const ROWS: u8, const COLS: u8, RowPins, ColPins> {
     type InPins: Pins;
     type OutPins: Pins;
 
@@ -437,7 +439,7 @@ where
     S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
     ColBitMatrixLayout<COLS>: BitMatrixLayout,
 {
-    matrix: BitMatrix<{ROWS as usize}, COLS>,
+    matrix: BitMatrix<{ ROWS as usize }, COLS>,
     input_pins: S::InPins,
     output_pins: S::OutPins,
     debouncer: D,
@@ -467,17 +469,18 @@ where
             sysclk_freq,
         }
     }
-
 }
 
-impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D> KeyMatrixLike<ROWS, COLS> for KeyMatrix<ROWS, COLS, RowPins, ColPins, S, D> where
+impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D> KeyMatrixLike<ROWS, COLS>
+    for KeyMatrix<ROWS, COLS, RowPins, ColPins, S, D>
+where
     [(); ROWS as usize]:,
     S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
     D: Debounce<ROWS, COLS>,
     ColBitMatrixLayout<COLS>: BitMatrixLayout,
     S::InPins: InputPins<{ S::InPins::COUNT }>,
-    S::OutPins: OutputPins<{ S::OutPins::COUNT }>, {
-
+    S::OutPins: OutputPins<{ S::OutPins::COUNT }>,
+{
     #[inline(always)]
     fn get_key_state(&self, row: u8, col: u8) -> KeyState {
         KeyState::from_bool(self.matrix.get_value(row as usize, col))
@@ -485,9 +488,9 @@ impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D> KeyMatrixLike<ROWS,
 
     #[inline(always)]
     fn set_key_state(&mut self, row: u8, col: u8, state: KeyState) {
-        self.matrix.set_value(row as usize, col, state == KeyState::Pressed);
+        self.matrix
+            .set_value(row as usize, col, state == KeyState::Pressed);
     }
-
 
     fn scan_matrix_act<F: FnMut(u8, u8, KeyState) -> ()>(&mut self, mut changed_fn: F) -> bool {
         let current_millis =
@@ -502,7 +505,7 @@ impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D> KeyMatrixLike<ROWS,
                 // stabilize. I guess this should take around... 10 ns
                 // with OSPEEDR set to medium. So at 96 MHz, two dummy
                 // instructions are more than enough.
-                asm!("and r1, r1", "and r1, r1",);
+                cortex_m::asm::delay(10);
             }
 
             let inputs = self.input_pins.read_inputs();

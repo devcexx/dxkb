@@ -1,4 +1,3 @@
-
 #[macro_export]
 #[cfg(feature = "__dev_log_enable_level_error")]
 macro_rules! dev_error {
@@ -12,7 +11,7 @@ macro_rules! dev_error {
 #[cfg(not(feature = "__dev_log_enable_level_error"))]
 macro_rules! dev_error {
     () => {};
-    ($($arg:tt)*) => {}
+    ($($arg:tt)*) => {};
 }
 
 #[macro_export]
@@ -28,7 +27,7 @@ macro_rules! dev_info {
 #[cfg(not(feature = "__dev_log_enable_level_info"))]
 macro_rules! dev_info {
     () => {};
-    ($($arg:tt)*) => {}
+    ($($arg:tt)*) => {};
 }
 
 #[macro_export]
@@ -44,7 +43,7 @@ macro_rules! dev_warn {
 #[cfg(not(feature = "__dev_log_enable_level_warn"))]
 macro_rules! dev_warn {
     () => {};
-    ($($arg:tt)*) => {}
+    ($($arg:tt)*) => {};
 }
 
 #[macro_export]
@@ -60,9 +59,8 @@ macro_rules! dev_debug {
 #[cfg(not(feature = "__dev_log_enable_level_debug"))]
 macro_rules! dev_debug {
     () => {};
-    ($($arg:tt)*) => {}
+    ($($arg:tt)*) => {};
 }
-
 
 #[macro_export]
 #[cfg(feature = "__dev_log_enable_level_trace")]
@@ -77,5 +75,5 @@ macro_rules! dev_trace {
 #[cfg(not(feature = "__dev_log_enable_level_trace"))]
 macro_rules! dev_trace {
     () => {};
-    ($($arg:tt)*) => {}
+    ($($arg:tt)*) => {};
 }
