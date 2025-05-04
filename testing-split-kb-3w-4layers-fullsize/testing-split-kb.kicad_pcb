@@ -23898,7 +23898,7 @@
 			(justify left bottom)
 		)
 	)
-	(gr_text "Testing key\nmatrix v1.1"
+	(gr_text "Testing key\nmatrix v1.1a"
 		(at 191.5 37.9 0)
 		(layer "F.SilkS")
 		(uuid "4dc14994-09f4-450b-9d62-63162a7eadc6")
@@ -24235,7 +24235,7 @@
 			(justify left bottom mirror)
 		)
 	)
-	(gr_text "Testing key\nmatrix v1.1"
+	(gr_text "Testing key\nmatrix v1.1a"
 		(at 191.5 37.9 0)
 		(layer "B.SilkS")
 		(uuid "d176bbf6-2511-4535-b09f-63376e12a83b")
