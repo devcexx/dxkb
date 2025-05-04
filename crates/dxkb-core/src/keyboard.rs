@@ -1,4 +1,4 @@
-use core::{marker::PhantomData, mem::MaybeUninit};
+use core::{any::Any, marker::PhantomData, mem::MaybeUninit};
 
 use dxkb_common::{
     KeyState, dev_debug, dev_error, dev_info, dev_trace, dev_warn,
@@ -60,7 +60,6 @@ pub trait SplitKeyboardSideType {
 
 /// The left side of a split keyboard.
 pub struct Left;
-
 /// The right side of a split keyboard.
 pub struct Right;
 
@@ -70,7 +69,7 @@ impl SplitKeyboardSideType for Left {
 }
 
 impl SplitKeyboardSideType for Right {
-    type Opposite = Right;
+    type Opposite = Left;
     const SIDE: SplitKeyboardSide = SplitKeyboardSide::Right;
 }
 
@@ -470,6 +469,8 @@ pub enum LayoutKey {
     // TODO This makes "hard" to define custom function keys, because
     // it is hard to pass a custom context to it. Is there a better way of doing this?
     Function(&'static dyn FunctionKey),
+
+    // TODO Add keys for System Control.
 }
 
 impl From<KeyboardUsage> for LayoutKey {

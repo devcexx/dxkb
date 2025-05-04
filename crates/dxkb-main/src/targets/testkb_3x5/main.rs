@@ -15,16 +15,17 @@
 #![deny(rustdoc::bare_urls)]
 #![feature(generic_const_exprs)]
 
+use core::any::{type_name, TypeId};
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 
 use cortex_m::interrupt::CriticalSection;
 use dxkb_common::dev_info;
 use dxkb_core::keyboard::{
-    LayerRow, LayoutLayer, Left, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage,
-    SplitLayoutConfig,
+    LayerRow, LayoutLayer, Left, Right, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig
 };
 use dxkb_core::keys;
+use dxkb_main::CurrentSide;
 use dxkb_peripheral::clock::DWTClock;
 use dxkb_peripheral::key_matrix::{
     ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, PinsWithSamePort,
@@ -53,9 +54,16 @@ use synopsys_usb_otg::UsbBus;
 use usb_device::bus::UsbBusAllocator;
 use usbd_hid::descriptor::KeyboardUsage;
 
+// The total layers of the layout.
 const LAYERS: u8 = 1;
-const ROWS: u8 = 3;
-const COLS: u8 = 5;
+
+// The dimensions of each side of the keyboard.
+const SIDE_ROWS: u8 = 3;
+const SIDE_COLS: u8 = 5;
+
+// The total dimensions of the keyboard, including both sides.
+const LAYOUT_ROWS: u8 = SIDE_ROWS;
+const LAYOUT_COLS: u8 = 2 * SIDE_COLS;
 
 type KeyMatrixRowPins = (
     Pin<'B', 10, Output<PushPull>>,
@@ -71,10 +79,15 @@ type KeyMatrixColPins = (
     Pin<'A', 2, Input>,
 );
 
-type KeyMatrixDebounce = DebouncerEagerPerKey<ROWS, COLS, 20>;
+// Pins for the Tx/Rx of the split bus. Note that this needs to be
+// configured alongside the SplitBusUsart and SplitBusDmaPeripheral.
+type SplitBusTxPin = Pin<'B', 6>;
+type SplitBusRxPin = Pin<'B', 7>;
+
+type KeyMatrixDebounce = DebouncerEagerPerKey<SIDE_ROWS, SIDE_COLS, 20>;
 type KeyMatrixT = KeyMatrix<
-    ROWS,
-    COLS,
+    SIDE_ROWS,
+    SIDE_COLS,
     KeyMatrixRowPins,
     PinsWithSamePort<KeyMatrixColPins>,
     RowScan,
@@ -82,8 +95,6 @@ type KeyMatrixT = KeyMatrix<
 >;
 
 type SplitBusUsart = USART1;
-type SplitBusTxPin = Pin<'B', 6>;
-type SplitBusRxPin = Pin<'B', 7>;
 type SplitBusDmaPeripheral = DMA2;
 
 type SplitBusTxDmaStream = Stream7<SplitBusDmaPeripheral>;
@@ -93,15 +104,15 @@ type SplitBusUart =
     UartDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4, 256, 128>;
 type SplitBusT = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUart, DWTClock, 32>;
 
-type LayoutT = SplitKeyboardLayout<KeyboardLayoutConfig, LAYERS, ROWS, COLS>;
+type LayoutT = SplitKeyboardLayout<KeyboardLayoutConfig, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
 type KeyboardT<'usb, USB> = SplitKeyboard<
     'usb,
     LAYERS,
-    ROWS,
-    COLS,
-    ROWS,
-    COLS,
-    Left,
+    LAYOUT_ROWS,
+    LAYOUT_COLS,
+    SIDE_ROWS,
+    SIDE_COLS,
+    CurrentSide,
     USB,
     KeyboardLayoutConfig,
     KeyMatrixT,
@@ -116,7 +127,7 @@ static mut USB_ALLOC: MaybeUninit<UsbBusAllocator<UsbBus<USB>>> = MaybeUninit::u
 
 struct KeyboardLayoutConfig;
 impl SplitLayoutConfig for KeyboardLayoutConfig {
-    const SPLIT_RIGHT_COL_OFFSET: u8 = 0;
+    const SPLIT_RIGHT_COL_OFFSET: u8 = 5;
 }
 
 fn init_split_bus(
@@ -158,9 +169,9 @@ fn init_key_matrix(rows: KeyMatrixRowPins, cols: KeyMatrixColPins, clocks: &Cloc
 fn build_keyboard_layout() -> LayoutT {
     LayoutT::new([
         LayoutLayer::new([
-            LayerRow::new_from([KeyboardUsage::KeyboardQq,                           KeyboardUsage::KeyboardWw,         KeyboardUsage::KeyboardEe,           KeyboardUsage::KeyboardRr, KeyboardUsage::KeyboardTt]),
-            LayerRow::new_from([KeyboardUsage::KeyboardAa,                           KeyboardUsage::KeyboardSs,         KeyboardUsage::KeyboardDd,           KeyboardUsage::KeyboardFf, KeyboardUsage::KeyboardGg]),
-            LayerRow::new_from([KeyboardUsage::KeyboardZz,                           KeyboardUsage::KeyboardXx,         KeyboardUsage::KeyboardCc,           KeyboardUsage::KeyboardVv, KeyboardUsage::KeyboardBb]),
+            LayerRow::new_from([KeyboardUsage::KeyboardQq, KeyboardUsage::KeyboardWw, KeyboardUsage::KeyboardEe, KeyboardUsage::KeyboardRr, KeyboardUsage::KeyboardTt, KeyboardUsage::KeyboardYy, KeyboardUsage::KeyboardUu, KeyboardUsage::KeyboardIi, KeyboardUsage::KeyboardOo, KeyboardUsage::KeyboardPp]),
+            LayerRow::new_from([KeyboardUsage::KeyboardAa, KeyboardUsage::KeyboardSs, KeyboardUsage::KeyboardDd, KeyboardUsage::KeyboardFf, KeyboardUsage::KeyboardGg, KeyboardUsage::KeyboardHh, KeyboardUsage::KeyboardJj, KeyboardUsage::KeyboardKk, KeyboardUsage::KeyboardLl, KeyboardUsage::KeyboardSingleDoubleQuote]),
+            LayerRow::new_from([KeyboardUsage::KeyboardZz, KeyboardUsage::KeyboardXx, KeyboardUsage::KeyboardCc, KeyboardUsage::KeyboardVv, KeyboardUsage::KeyboardBb, KeyboardUsage::KeyboardNn, KeyboardUsage::KeyboardMm, KeyboardUsage::KeyboardCommaLess, KeyboardUsage::KeyboardPeriodGreater, KeyboardUsage::KeyboardSlashQuestion]),
         ])
     ])
 }
@@ -177,6 +188,8 @@ const MASTER: bool = true;
 const MASTER: bool = false;
 
 fn main0() -> ! {
+
+
     let dp = pac::Peripherals::take().unwrap();
     let mut cortex = cortex_m::Peripherals::take().unwrap();
 
@@ -195,7 +208,9 @@ fn main0() -> ! {
     let gpiob = dp.GPIOB.split();
 
     itm_logger::init_with_level(log::Level::Trace).unwrap();
-    dev_info!("Device startup");
+    dev_info!("Device startup. Device configuration:");
+    dev_info!(" - Current Side: {:?}", type_name::<CurrentSide>());
+    dev_info!(" - Master: {}", MASTER);
 
     let clock = DWTClock::new(&clocks, &mut cortex.DCB, &mut cortex.DWT);
 
