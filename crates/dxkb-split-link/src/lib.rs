@@ -143,6 +143,7 @@ pub enum FrameDecodeError {
 #[derive(Debug)]
 pub enum TransferError {
     BufferOverflow,
+    LinkDown
 }
 
 impl<M> FrameContentEnvelope<M> {
@@ -700,6 +701,10 @@ where
     }
 
     fn transfer(&mut self, message: Msg) -> Result<(), TransferError> {
+        if self.link_status != LinkStatus::Up {
+            return Err(TransferError::LinkDown);
+        }
+
         if self.user_tx_queue.is_full() {
             return Err(TransferError::BufferOverflow);
         } else {
