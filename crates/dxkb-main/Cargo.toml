@@ -21,7 +21,6 @@ required-features = ["stm32f411"]
   
 [features]
 stm32f411 = ["stm32f4xx-hal/stm32f411", "dxkb-peripheral/stm32f411"]
-master = []
 side-left = []
 side-right = []
   

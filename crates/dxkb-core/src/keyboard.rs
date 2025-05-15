@@ -9,6 +9,7 @@ use dxkb_split_link::SplitBusLike;
 use heapless::Vec;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use serde::{Deserialize, Serialize};
+use stm32f4xx_hal::{gpio::{Input, Pin, PinMode, PinPull, Pull}, hal::digital::InputPin};
 use usb_device::{
     LangID,
     bus::{UsbBus, UsbBusAllocator},
@@ -21,6 +22,47 @@ use usbd_hid::{
         HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig,
     },
 };
+
+pub trait MasterCheck {
+    fn is_current_master(&mut self) -> bool;
+}
+
+pub struct AlwaysMaster;
+pub struct AlwaysSlave;
+
+impl MasterCheck for AlwaysMaster {
+    fn is_current_master(&mut self) -> bool {
+        return true;
+    }
+}
+
+impl MasterCheck for AlwaysSlave {
+    fn is_current_master(&mut self) -> bool {
+        return false;
+    }
+}
+
+pub struct PinMasterSense<P: InputPin> {
+    pin: P
+}
+
+impl<P: InputPin + PinPull> PinMasterSense<P> {
+    pub fn new(mut pin: P) -> Self {
+        pin.set_internal_resistor(Pull::Down);
+
+        Self {
+            pin
+        }
+    }
+}
+
+impl<P: InputPin> MasterCheck for PinMasterSense<P> {
+    fn is_current_master(&mut self) -> bool {
+        // TODO I don't expect this input to have any capacitance, so maybe it is subject to noise or something. Should I read it multiple times?
+        self.pin.is_high().unwrap_or(false)
+    }
+}
+
 
 use crate::keys::FunctionKey;
 
@@ -91,6 +133,7 @@ pub struct SplitKeyboard<
     USB: UsbBus,
     LayoutConfig: SplitLayoutConfig,
     Matrix: KeyMatrixLike<MROWS, MCOLS>,
+    MasterTester: MasterCheck,
     SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
 > where
     ColBitMatrixLayout<LCOLS>: BitMatrixLayout,
@@ -103,7 +146,8 @@ pub struct SplitKeyboard<
     matrix: Matrix,
     layout: SplitKeyboardLayout<LayoutConfig, LLAYERS, LROWS, LCOLS>,
     pub split_bus: SplitBus,
-    master: bool,
+    master_tester: MasterTester,
+    is_master: bool,
 
     /// Holds the in keyboard report pending to be sent, that have
     /// previously failed to be sent because the usb device was busy.
@@ -123,6 +167,7 @@ impl<
     USB,
     LayoutConfig,
     Matrix,
+    MasterTester,
     SplitBus,
 >
     SplitKeyboard<
@@ -136,6 +181,7 @@ impl<
         USB,
         LayoutConfig,
         Matrix,
+        MasterTester,
         SplitBus,
     >
 where
@@ -145,6 +191,7 @@ where
     LayoutConfig: SplitLayoutConfig,
     ColBitMatrixLayout<LCOLS>: BitMatrixLayout,
     Matrix: KeyMatrixLike<MROWS, MCOLS>,
+MasterTester: MasterCheck,
     SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
     [(); LLAYERS as usize]:,
     [(); LCOLS as usize]:,
@@ -166,7 +213,7 @@ where
         layout: SplitKeyboardLayout<LayoutConfig, LLAYERS, LROWS, LCOLS>,
         matrix: Matrix,
         split_bus: SplitBus,
-        master: bool,
+        master_tester: MasterTester
     ) -> Self {
         const { Self::assert_config_ok() }
 
@@ -203,7 +250,8 @@ where
             matrix,
             layout,
             split_bus,
-            master,
+            master_tester,
+            is_master: false,
             pending_in_keyb_report: None,
             _side: PhantomData,
             _layout_config: PhantomData,
@@ -379,15 +427,29 @@ where
                     dev_warn!("Unexpected MatrixKeyDown message received while in slave mode");
                 }
                 SplitKeyboardLinkMessage::MatrixKeyUp { row: _, col: _ } => {
-                    dev_warn!("Unexpected MatrixKeyDown message received while in slave mode");
+                    dev_warn!("Unexpected MatrixKeyUp message received while in slave mode");
                 }
             }
             true
         });
     }
 
+    fn check_master(&mut self) {
+        let res = self.master_tester.is_current_master();
+        if res != self.is_master {
+            self.is_master = res;
+            if res {
+                dev_info!("Controller has been promoted to master");
+            } else {
+                dev_info!("Controller has been downgraded to slave");
+            }
+        }
+    }
+
     pub fn poll(&mut self) {
-        if self.master {
+        self.check_master();
+
+        if self.is_master {
             self.poll_master();
         } else {
             self.poll_slave();
@@ -406,6 +468,7 @@ impl<
     USB,
     LayoutConfig,
     Matrix,
+    MasterTester,
     SplitBus,
 > SplitKeyboardOps
     for SplitKeyboard<
@@ -419,6 +482,7 @@ impl<
         USB,
         LayoutConfig,
         Matrix,
+        MasterTester,
         SplitBus,
     >
 where
@@ -428,6 +492,7 @@ where
     LayoutConfig: SplitLayoutConfig,
     ColBitMatrixLayout<LCOLS>: BitMatrixLayout,
     Matrix: KeyMatrixLike<MROWS, MCOLS>,
+MasterTester: MasterCheck,
     SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
     [(); LLAYERS as usize]:,
     [(); LCOLS as usize]:,

@@ -19,10 +19,11 @@ use core::any::{type_name, TypeId};
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 
+use cortex_m::delay::Delay;
 use cortex_m::interrupt::CriticalSection;
 use dxkb_common::dev_info;
 use dxkb_core::keyboard::{
-    LayerRow, LayoutLayer, Left, Right, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig
+    LayerRow, LayoutLayer, Left, PinMasterSense, Right, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig
 };
 use dxkb_core::keys;
 use dxkb_main::CurrentSide;
@@ -79,6 +80,15 @@ type KeyMatrixColPins = (
     Pin<'A', 2, Input>,
 );
 
+// Pin that will be used to test whether the current controller is
+// receiving power from the USB bus:
+//  - On STeMCell, this is already done in the board by wiring a connection from the USB
+//  BUS to the A9 pin, through a voltage divider.
+//  - On a development controller, this pin might not be available (on a BlackPill, it is not). For testing,
+//    you might need to manually pull that pin, or pick other detection mechanism.
+type UsbBusSensePin = Pin<'A', 9>;
+
+
 // Pins for the Tx/Rx of the split bus. Note that this needs to be
 // configured alongside the SplitBusUsart and SplitBusDmaPeripheral.
 type SplitBusTxPin = Pin<'B', 6>;
@@ -92,7 +102,7 @@ type KeyMatrixT = KeyMatrix<
     PinsWithSamePort<KeyMatrixColPins>,
     RowScan,
     KeyMatrixDebounce,
->;
+    >;
 
 type SplitBusUsart = USART1;
 type SplitBusDmaPeripheral = DMA2;
@@ -116,8 +126,9 @@ type KeyboardT<'usb, USB> = SplitKeyboard<
     USB,
     KeyboardLayoutConfig,
     KeyMatrixT,
+    PinMasterSense<UsbBusSensePin>,
     SplitBusT,
->;
+    >;
 
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 static mut SPLIT_BUS_DMA_RX_BUF: DmaRingBuffer<256, 128> = DmaRingBuffer::new();
@@ -181,15 +192,7 @@ fn main() -> ! {
     main0()
 }
 
-// TODO replace by automatic master detection.
-#[cfg(feature = "master")]
-const MASTER: bool = true;
-#[cfg(not(feature = "master"))]
-const MASTER: bool = false;
-
 fn main0() -> ! {
-
-
     let dp = pac::Peripherals::take().unwrap();
     let mut cortex = cortex_m::Peripherals::take().unwrap();
 
@@ -210,7 +213,6 @@ fn main0() -> ! {
     itm_logger::init_with_level(log::Level::Trace).unwrap();
     dev_info!("Device startup. Device configuration:");
     dev_info!(" - Current Side: {:?}", type_name::<CurrentSide>());
-    dev_info!(" - Master: {}", MASTER);
 
     let clock = DWTClock::new(&clocks, &mut cortex.DCB, &mut cortex.DWT);
 
@@ -251,7 +253,7 @@ fn main0() -> ! {
             build_keyboard_layout(),
             matrix,
             split_bus,
-            MASTER,
+            PinMasterSense::new(gpioa.pa9.into_input())
         ));
     }
 
