@@ -26,7 +26,7 @@ use dxkb_core::keyboard::{
     LayerRow, LayoutLayer, Left, PinMasterSense, Right, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig
 };
 use dxkb_core::keys;
-use dxkb_main::CurrentSide;
+use dxkb_main::{make_usb_master_checker, CurrentSide, MasterCheckType};
 use dxkb_peripheral::clock::DWTClock;
 use dxkb_peripheral::key_matrix::{
     ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, PinsWithSamePort,
@@ -126,7 +126,7 @@ type KeyboardT<'usb, USB> = SplitKeyboard<
     USB,
     KeyboardLayoutConfig,
     KeyMatrixT,
-    PinMasterSense<UsbBusSensePin>,
+    MasterCheckType<UsbBusSensePin>,
     SplitBusT,
     >;
 
@@ -247,13 +247,14 @@ fn main0() -> ! {
     );
 
     let split_bus = init_split_bus(dp.USART1, dp.DMA2, gpiob.pb6, gpiob.pb7, clock, &clocks);
+    let master_tester = make_usb_master_checker(gpioa.pa9.into_input());
     unsafe {
         KEYBOARD.write(KeyboardT::new(
             usb_alloc,
             build_keyboard_layout(),
             matrix,
             split_bus,
-            PinMasterSense::new(gpioa.pa9.into_input())
+            master_tester
         ));
     }
 
