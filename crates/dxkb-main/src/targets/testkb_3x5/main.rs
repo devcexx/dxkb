@@ -23,7 +23,7 @@ use cortex_m::delay::Delay;
 use cortex_m::interrupt::CriticalSection;
 use dxkb_common::dev_info;
 use dxkb_core::keyboard::{
-    LayerRow, LayoutLayer, Left, PinMasterSense, Right, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig
+    LayerRow, LayoutKey, LayoutLayer, Left, PinMasterSense, Right, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig
 };
 use dxkb_core::keys;
 use dxkb_main::{make_usb_master_checker, CurrentSide, MasterCheckType};
@@ -178,14 +178,24 @@ fn init_key_matrix(rows: KeyMatrixRowPins, cols: KeyMatrixColPins, clocks: &Cloc
 
 #[rustfmt::skip]
 fn build_keyboard_layout() -> LayoutT {
-    LayoutT::new([
-        LayoutLayer::new([
-            LayerRow::new_from([KeyboardUsage::KeyboardQq, KeyboardUsage::KeyboardWw, KeyboardUsage::KeyboardEe, KeyboardUsage::KeyboardRr, KeyboardUsage::KeyboardTt, KeyboardUsage::KeyboardYy, KeyboardUsage::KeyboardUu, KeyboardUsage::KeyboardIi, KeyboardUsage::KeyboardOo, KeyboardUsage::KeyboardPp]),
-            LayerRow::new_from([KeyboardUsage::KeyboardAa, KeyboardUsage::KeyboardSs, KeyboardUsage::KeyboardDd, KeyboardUsage::KeyboardFf, KeyboardUsage::KeyboardGg, KeyboardUsage::KeyboardHh, KeyboardUsage::KeyboardJj, KeyboardUsage::KeyboardKk, KeyboardUsage::KeyboardLl, KeyboardUsage::KeyboardSingleDoubleQuote]),
-            LayerRow::new_from([KeyboardUsage::KeyboardZz, KeyboardUsage::KeyboardXx, KeyboardUsage::KeyboardCc, KeyboardUsage::KeyboardVv, KeyboardUsage::KeyboardBb, KeyboardUsage::KeyboardNn, KeyboardUsage::KeyboardMm, KeyboardUsage::KeyboardCommaLess, KeyboardUsage::KeyboardPeriodGreater, KeyboardUsage::KeyboardSlashQuestion]),
-        ])
-    ])
+    LayoutT::new(
+        // TODO Still need to implement aliases for symbols and function keys.
+        dxkb_proc_macros::layers![
+            {
+                name: "base",
+                rows: [
+                    [Q, W, E, R, T, Y, U, I, O, P],
+                    [A, S, D, F, G, H, J, K, L, SingleDoubleQuote],
+                    [Z, X, C, V, B, N, M, CommaLess, PeriodGreater, SlashQuestion],
+                ]
+            }
+        ]
+    )
 }
+
+
+
+
 
 #[entry]
 fn main() -> ! {

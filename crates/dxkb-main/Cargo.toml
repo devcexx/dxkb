@@ -32,6 +32,7 @@ dxkb-common = { path = "../dxkb-common", features = ["dev-log-level-trace"] }
 dxkb-core = { path = "../dxkb-core" }
 dxkb-peripheral = { path = "../dxkb-peripheral" }
 dxkb-split-link = { path = "../dxkb-split-link" }
+dxkb-proc-macros = { path = "../dxkb-proc-macros" }
 
 cortex-m = { workspace = true }
 cortex-m-rt = { workspace = true }

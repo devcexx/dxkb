@@ -1,10 +1,12 @@
 #![no_std]
+#![feature(exhaustive_patterns)]
 
 pub mod bus;
 mod devlog;
 mod key;
 pub mod time;
 pub mod util;
+
 pub use key::*;
 
 pub use log as __log;

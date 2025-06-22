@@ -17,11 +17,14 @@ use usb_device::{
 };
 use usbd_hid::{
     UsbError,
-    descriptor::{KeyboardReport, KeyboardUsage, SerializedDescriptor},
+    descriptor::{KeyboardReport, SerializedDescriptor},
     hid_class::{
         HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig,
     },
 };
+
+// Re-export it to be used for macros without needing to reference the usbd-hid crate.
+pub use usbd_hid::descriptor::KeyboardUsage;
 
 pub trait MasterCheck {
     fn is_current_master(&mut self) -> bool;
@@ -294,6 +297,7 @@ MasterTester: MasterCheck,
             .set_real_key_state(real_row, real_col, current_state);
         if changed {
             match self.layout.get_key_definition(real_row, real_col) {
+                LayoutKey::NoOp => {},
                 LayoutKey::Standard(key) => {
                     if current_state == KeyState::Pressed {
                         Self::update_usb_key_pressed_report(usb_keys_pressed_report, key);
@@ -529,6 +533,7 @@ MasterTester: MasterCheck,
 
 #[derive(Clone, Copy)]
 pub enum LayoutKey {
+    NoOp,
     Standard(KeyboardUsage),
 
     // TODO This makes "hard" to define custom function keys, because

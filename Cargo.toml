@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/dxkb-common", "crates/dxkb-peripheral", "crates/dxkb-split-link", "crates/dxkb-main", "crates/dxkb-split-link-tester"]
+members = ["crates/dxkb-common", "crates/dxkb-peripheral", "crates/dxkb-split-link", "crates/dxkb-main", "crates/dxkb-split-link-tester", "crates/dxkb-proc-macros"]
 
 #[features]
 #default = ["stm32f411", "dev-log"]
