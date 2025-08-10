@@ -1,15 +1,9 @@
-use proc_macro2::{Delimiter, Group, Span, TokenStream};
+use proc_macro2::{Delimiter, Group, Span, TokenStream, TokenTree};
 use quote::{ToTokens, TokenStreamExt, quote};
 use std::rc::Rc;
 use syn::{
-    Ident, LitInt, LitStr, Token, braced, bracketed,
-    parse::{Parse, ParseStream, Parser},
-    parse_macro_input,
-    punctuated::Punctuated,
-    spanned::Spanned,
+    braced, bracketed, parse::{Parse, ParseStream, Parser}, parse_macro_input, punctuated::Punctuated, spanned::Spanned, token::{self, Token}, Ident, LitInt, LitStr, Token
 };
-
-mod keymap;
 
 struct ResultAcc<T, E> {
     oks: Vec<T>,
@@ -98,45 +92,43 @@ impl ToString for KeyRef {
 #[derive(Debug, Clone)]
 enum KeyAction {
     Passthrough(Span),
-    NoOp(Span),
-    StandardKey(KeyRef),
-    FunctionKey(KeyRef),
+    Key(TokenStream)
 }
 
-/// A [`KeyAction`] that has been computed, taking into account any
-/// parent layer, which removes the "Passthrough" key action.
+/// A [`KeyAction`] that has been computed, taking into account any parent
+/// layer, which removes the "Passthrough" key action. This enum was useful when
+/// it used to be more than one action available for each key. Now, any key is
+/// considered the same, and the alias translation is delegated in a proc macro,
+/// but leaving it in case I need to add more variants in the future.
 #[derive(Debug, Clone)]
 enum ConcreteKeyAction {
-    NoOp,
-    StandardKey(KeyRef),
-    FunctionKey(KeyRef),
+    Key(TokenStream)
 }
 impl Parse for KeyAction {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         if let Ok(t) = input.parse::<Token![*]>() {
             return Ok(KeyAction::Passthrough(t.span));
         }
-        if let Ok(t) = input.parse::<Token![_]>() {
-            return Ok(KeyAction::NoOp(t.span));
-        }
 
-        if let Ok(r) = input.parse::<LitInt>() {
-            if input.is_empty() || input.peek(Token![,]) {
-                return Ok(Self::StandardKey(KeyRef::LitInt(r.base10_parse().unwrap())));
+        // Read every token until the next comma appears.
+        let key_tokens = input.step(|cursor| {
+            let mut rest = *cursor;
+            let mut read = TokenStream::new();
+            while let Some((tt, next)) = rest.token_tree() {
+                match &tt {
+                    TokenTree::Punct(punct) if punct.as_char() == ',' => {
+                        return Ok((read, rest));
+                    }
+                    tt => {
+                        read.append(tt.clone());
+                        rest = next
+                    },
+                }
             }
-        }
+            Ok((read, rest))
+        })?;
 
-        let first_ident = input.parse::<Ident>()?;
-        if input.is_empty() || input.peek(Token![,]) {
-            // EOF, this should be a standard key
-            Ok(KeyAction::StandardKey(KeyRef::Ident(
-                first_ident.to_string(),
-            )))
-        } else {
-            input.parse::<Token![:]>()?;
-            let key_ref = input.parse::<Ident>()?;
-            Ok(KeyAction::FunctionKey(KeyRef::Ident(key_ref.to_string())))
-        }
+        Ok(KeyAction::Key(key_tokens))
     }
 }
 
@@ -536,13 +528,7 @@ impl ResolvedLayersDef<KeyAction> {
                 .enumerate()
                 .map(|(action_idx, action)| match action {
                     KeyAction::Passthrough(_) => parent.rows[row_idx].actions[action_idx].clone(),
-                    KeyAction::NoOp(_) => ConcreteKeyAction::NoOp,
-                    KeyAction::StandardKey(key_ref) => {
-                        ConcreteKeyAction::StandardKey(key_ref.clone())
-                    }
-                    KeyAction::FunctionKey(key_ref) => {
-                        ConcreteKeyAction::StandardKey(key_ref.clone())
-                    }
+                    KeyAction::Key(tt) => ConcreteKeyAction::Key(tt.clone()),
                 })
                 .collect::<Vec<_>>();
 
@@ -578,13 +564,7 @@ impl ResolvedLayersDef<KeyAction> {
                         *span,
                         format!("Cannot use the passthrough action on a layer with no parent"),
                     )),
-                    KeyAction::NoOp(_) => Ok(ConcreteKeyAction::NoOp),
-                    KeyAction::StandardKey(key_ref) => {
-                        Ok(ConcreteKeyAction::StandardKey(key_ref.clone()))
-                    }
-                    KeyAction::FunctionKey(key_ref) => {
-                        Ok(ConcreteKeyAction::StandardKey(key_ref.clone()))
-                    }
+                    KeyAction::Key(tt) => Ok(ConcreteKeyAction::Key(tt.clone())),
                 })
                 .collect::<ResultAcc<_, _>>();
             if let Some(err) = combine_syn_errors(&r.errors) {
@@ -663,19 +643,9 @@ impl ToTokens for ConcreteKeyAction {
             ::dxkb_core::def_key::DefaultKey
         };
         let layout_key_ref = match self {
-            ConcreteKeyAction::NoOp => quote! {
-                #LayoutKey::NoOp
+            ConcreteKeyAction::Key(tt) => quote! {
+                dxkb_core::default_key_from_alias!(#tt)
             },
-            ConcreteKeyAction::StandardKey(key_ref) => {
-                let key_tokens = keymap::translate_standard_key_ref_into_hid_key(key_ref);
-
-                quote! {
-                    #LayoutKey::Standard(#key_tokens)
-                }
-            }
-            ConcreteKeyAction::FunctionKey(key_ref) => {
-                todo!("Still need to figure out if I like the current function keys approach?")
-            }
         };
 
         tokens.append_all(layout_key_ref);

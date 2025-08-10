@@ -14,13 +14,14 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(rustdoc::bare_urls)]
 #![feature(generic_const_exprs)]
+#![feature(macro_metavar_expr_concat)]
 
 use core::any::type_name;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 
 use dxkb_common::dev_info;
-use dxkb_core::def_key::DefaultKey;
+use dxkb_core::keys::DefaultKey;
 use dxkb_core::keyboard::{
     SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig,
 };
@@ -177,14 +178,13 @@ fn init_key_matrix(rows: KeyMatrixRowPins, cols: KeyMatrixColPins, clocks: &Cloc
 #[rustfmt::skip]
 fn build_keyboard_layout() -> LayoutT {
     LayoutT::new(
-        // TODO Still need to implement aliases for symbols and function keys.
         dxkb_proc_macros::layers![
             {
                 name: "base",
                 rows: [
-                    [Q, W, E, R, T, Y, U, I, O, P],
-                    [A, S, D, F, G, H, J, K, L, SingleDoubleQuote],
-                    [Z, X, C, V, B, N, M, CommaLess, PeriodGreater, SlashQuestion],
+                    ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+                    ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
+                    ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', f:PshLyr(1)],
                 ]
             }
         ]
