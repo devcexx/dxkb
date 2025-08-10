@@ -537,7 +537,9 @@ impl ResolvedLayersDef<KeyAction> {
 impl ToTokens for ConcreteKeyAction {
     #[allow(non_snake_case)]
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let LayoutKey = dxkb_keyboard_symbol("LayoutKey");
+        let LayoutKey = quote! {
+            ::dxkb_core::def_key::DefaultKey
+        };
         let layout_key_ref = match self {
             ConcreteKeyAction::NoOp => quote! {
                 #LayoutKey::NoOp

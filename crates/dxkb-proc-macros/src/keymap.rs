@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 
-use crate::{dxkb_keyboard_symbol, KeyRef};
+use crate::{KeyRef, dxkb_keyboard_symbol};
 
 #[allow(non_snake_case)]
 fn build_usb_keyboard_usage_ref<A: ToTokens>(key: A) -> TokenStream {
@@ -62,9 +62,13 @@ thread_local! {
 }
 
 pub fn translate_standard_key_ref_into_hid_key(key: &KeyRef) -> TokenStream {
-    let key_tokens = KNOWN_STANDARD_KEY_ALIASES.with(|map| {
-        map.get(key).map(build_usb_keyboard_usage_ref)
-    });
+    let key_tokens =
+        KNOWN_STANDARD_KEY_ALIASES.with(|map| map.get(key).map(build_usb_keyboard_usage_ref));
 
-    key_tokens.unwrap_or_else(|| build_usb_keyboard_usage_ref(Ident::new(&format!("Keyboard{}", &key.to_string()), Span::call_site())))
+    key_tokens.unwrap_or_else(|| {
+        build_usb_keyboard_usage_ref(Ident::new(
+            &format!("Keyboard{}", &key.to_string()),
+            Span::call_site(),
+        ))
+    })
 }

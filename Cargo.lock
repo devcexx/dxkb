@@ -420,6 +420,7 @@ dependencies = [
  "dxkb-peripheral",
  "dxkb-proc-macros",
  "dxkb-split-link",
+ "heapless",
  "itm_logger",
  "log",
  "panic-itm",

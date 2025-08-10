@@ -1,5 +1,6 @@
 #![no_std]
 #![feature(exhaustive_patterns)]
+#![feature(generic_const_exprs)]
 
 pub mod bus;
 mod devlog;

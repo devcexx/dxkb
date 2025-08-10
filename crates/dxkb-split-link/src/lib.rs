@@ -210,7 +210,7 @@ pub trait SplitBusLike<Msg: Clone + Debug> {
 
     #[inline]
     fn poll_into_vec<const MAX: usize>(&mut self, buf: &mut Vec<Msg, MAX>) -> usize {
-        self.poll_max(MAX, |msg, offset| {
+        self.poll_max(MAX, |msg, _| {
             buf.push(msg.clone()).unwrap();
         })
     }

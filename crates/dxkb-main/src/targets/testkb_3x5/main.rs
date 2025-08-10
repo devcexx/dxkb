@@ -16,16 +16,18 @@
 #![feature(generic_const_exprs)]
 
 use core::any::{type_name, TypeId};
+use core::hint::black_box;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
+use core::sync::atomic::fence;
 
 use cortex_m::delay::Delay;
 use cortex_m::interrupt::CriticalSection;
 use dxkb_common::dev_info;
+use dxkb_core::def_key::DefaultKey;
 use dxkb_core::keyboard::{
-    LayerRow, LayoutKey, LayoutLayer, Left, PinMasterSense, Right, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig
+    LayerRow, LayoutLayer, Left, PinMasterSense, Right, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig
 };
-use dxkb_core::keys;
 use dxkb_main::{make_usb_master_checker, CurrentSide, MasterCheckType};
 use dxkb_peripheral::clock::DWTClock;
 use dxkb_peripheral::key_matrix::{
@@ -33,6 +35,7 @@ use dxkb_peripheral::key_matrix::{
     RowScan,
 };
 
+use log::info;
 #[allow(unused_imports)]
 use panic_itm as _;
 
@@ -41,7 +44,7 @@ use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, UartDmaRb};
 use dxkb_split_link::{DefaultSplitLinkTimings, SplitBus, TestingTimings};
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::{Input, Output, Pin, PushPull};
-use stm32f4xx_hal::pac::{DMA2, Interrupt, USART1};
+use stm32f4xx_hal::pac::{Interrupt, DMA2, DWT, USART1};
 use stm32f4xx_hal::rcc::Clocks;
 use stm32f4xx_hal::{
     dma::StreamsTuple,
@@ -114,7 +117,7 @@ type SplitBusUart =
     UartDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4, 256, 128>;
 type SplitBusT = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUart, DWTClock, 32>;
 
-type LayoutT = SplitKeyboardLayout<KeyboardLayoutConfig, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
+type LayoutT = SplitKeyboardLayout<KeyboardLayoutConfig, DefaultKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
 type KeyboardT<'usb, USB> = SplitKeyboard<
     'usb,
     LAYERS,
@@ -125,9 +128,11 @@ type KeyboardT<'usb, USB> = SplitKeyboard<
     CurrentSide,
     USB,
     KeyboardLayoutConfig,
+    DefaultKey,
     KeyMatrixT,
     MasterCheckType<UsbBusSensePin>,
     SplitBusT,
+    ()
     >;
 
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
@@ -193,10 +198,6 @@ fn build_keyboard_layout() -> LayoutT {
     )
 }
 
-
-
-
-
 #[entry]
 fn main() -> ! {
     main0()
@@ -234,6 +235,7 @@ fn main0() -> ! {
         pin_dp: gpioa.pa12.into(),
         hclk: clocks.hclk(),
     };
+
     let usb_alloc = unsafe {
         USB_ALLOC.write(UsbBus::new(usb, unsafe {
             addr_of_mut!(EP_MEMORY).as_mut().unwrap()
@@ -275,7 +277,7 @@ fn main0() -> ! {
 
     loop {
         unsafe {
-            KEYBOARD.assume_init_mut().poll();
+            KEYBOARD.assume_init_mut().poll(&mut ());
         }
     }
 }

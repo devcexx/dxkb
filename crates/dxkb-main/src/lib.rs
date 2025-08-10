@@ -8,7 +8,7 @@
 
 use core::marker::PhantomData;
 
-use dxkb_core::keyboard::{AlwaysMaster, AlwaysSlave, Left, PinMasterSense, Right};
+use dxkb_core::keyboard::{AlwaysMaster, AlwaysSlave, LayoutLayer, Left, PinMasterSense, Right};
 
 #[cfg(not(any(feature = "side-right", feature = "side-left")))]
 compile_error!("Not side has been specified. Either side-left or side-right feature must be enabled!");

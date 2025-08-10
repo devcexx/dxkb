@@ -2,4 +2,4 @@
 #![no_std]
 
 pub mod keyboard;
-pub mod keys;
+pub mod def_key;
