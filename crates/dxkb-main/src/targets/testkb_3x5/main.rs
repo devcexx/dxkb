@@ -15,36 +15,30 @@
 #![deny(rustdoc::bare_urls)]
 #![feature(generic_const_exprs)]
 
-use core::any::{type_name, TypeId};
-use core::hint::black_box;
+use core::any::type_name;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
-use core::sync::atomic::fence;
 
-use cortex_m::delay::Delay;
-use cortex_m::interrupt::CriticalSection;
 use dxkb_common::dev_info;
 use dxkb_core::def_key::DefaultKey;
 use dxkb_core::keyboard::{
-    LayerRow, LayoutLayer, Left, PinMasterSense, Right, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig
+    SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig,
 };
-use dxkb_main::{make_usb_master_checker, CurrentSide, MasterCheckType};
+use dxkb_main::{CurrentSide, MasterCheckType, make_usb_master_checker};
 use dxkb_peripheral::clock::DWTClock;
 use dxkb_peripheral::key_matrix::{
-    ColumnScan, DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, PinsWithSamePort,
-    RowScan,
+    DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, PinsWithSamePort, RowScan,
 };
 
-use log::info;
 #[allow(unused_imports)]
 use panic_itm as _;
 
 use cortex_m_rt::entry;
 use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, UartDmaRb};
-use dxkb_split_link::{DefaultSplitLinkTimings, SplitBus, TestingTimings};
+use dxkb_split_link::{SplitBus, TestingTimings};
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::{Input, Output, Pin, PushPull};
-use stm32f4xx_hal::pac::{Interrupt, DMA2, DWT, USART1};
+use stm32f4xx_hal::pac::{DMA2, Interrupt, USART1};
 use stm32f4xx_hal::rcc::Clocks;
 use stm32f4xx_hal::{
     dma::StreamsTuple,
@@ -56,7 +50,6 @@ use stm32f4xx_hal::{
 };
 use synopsys_usb_otg::UsbBus;
 use usb_device::bus::UsbBusAllocator;
-use usbd_hid::descriptor::KeyboardUsage;
 
 // The total layers of the layout.
 const LAYERS: u8 = 1;
@@ -91,7 +84,6 @@ type KeyMatrixColPins = (
 //    you might need to manually pull that pin, or pick other detection mechanism.
 type UsbBusSensePin = Pin<'A', 9>;
 
-
 // Pins for the Tx/Rx of the split bus. Note that this needs to be
 // configured alongside the SplitBusUsart and SplitBusDmaPeripheral.
 type SplitBusTxPin = Pin<'B', 6>;
@@ -105,7 +97,7 @@ type KeyMatrixT = KeyMatrix<
     PinsWithSamePort<KeyMatrixColPins>,
     RowScan,
     KeyMatrixDebounce,
-    >;
+>;
 
 type SplitBusUsart = USART1;
 type SplitBusDmaPeripheral = DMA2;
@@ -117,7 +109,8 @@ type SplitBusUart =
     UartDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4, 256, 128>;
 type SplitBusT = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUart, DWTClock, 32>;
 
-type LayoutT = SplitKeyboardLayout<KeyboardLayoutConfig, DefaultKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
+type LayoutT =
+    SplitKeyboardLayout<KeyboardLayoutConfig, DefaultKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
 type KeyboardT<'usb, USB> = SplitKeyboard<
     'usb,
     LAYERS,
@@ -132,8 +125,8 @@ type KeyboardT<'usb, USB> = SplitKeyboard<
     KeyMatrixT,
     MasterCheckType<UsbBusSensePin>,
     SplitBusT,
-    ()
-    >;
+    (),
+>;
 
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 static mut SPLIT_BUS_DMA_RX_BUF: DmaRingBuffer<256, 128> = DmaRingBuffer::new();
@@ -266,7 +259,7 @@ fn main0() -> ! {
             build_keyboard_layout(),
             matrix,
             split_bus,
-            master_tester
+            master_tester,
         ));
     }
 

@@ -1,4 +1,7 @@
-use core::{fmt::{write, Debug, Display}, num::NonZeroU8, ops::Index};
+use core::{
+    fmt::{Debug, Display},
+    ops::Index,
+};
 
 use super::{ConstCond, IsTrue};
 
@@ -22,7 +25,10 @@ impl<const LENGTH: u8> Debug for BoundedU8<LENGTH> {
     }
 }
 
-impl<const LENGTH: u8> BoundedU8<LENGTH> where ConstCond<{LENGTH > 0}>: IsTrue {
+impl<const LENGTH: u8> BoundedU8<LENGTH>
+where
+    ConstCond<{ LENGTH > 0 }>: IsTrue,
+{
     pub const ZERO: BoundedU8<LENGTH> = BoundedU8(0);
 }
 
@@ -32,9 +38,7 @@ impl<const LENGTH: u8> BoundedU8<LENGTH> {
     }
 
     pub const fn from_const<const N: u8>() -> Self {
-        const {
-            Self::assert_range_ok(N)
-        }
+        const { Self::assert_range_ok(N) }
 
         Self(N)
     }
@@ -60,12 +64,15 @@ impl<const LENGTH: u8> BoundedU8<LENGTH> {
 
         unsafe {
             // SAFETY: Next value validity checked before
-            return Some(Self::from_value_unchecked(self.0 + 1))
+            return Some(Self::from_value_unchecked(self.0 + 1));
         }
     }
 }
 
-impl<A, const LENGTH: u8> Index<BoundedU8<LENGTH>> for [A; LENGTH as usize] where [(); LENGTH as usize]: {
+impl<A, const LENGTH: u8> Index<BoundedU8<LENGTH>> for [A; LENGTH as usize]
+where
+    [(); LENGTH as usize]:,
+{
     type Output = A;
 
     fn index(&self, index: BoundedU8<LENGTH>) -> &Self::Output {
@@ -76,17 +83,13 @@ impl<A, const LENGTH: u8> Index<BoundedU8<LENGTH>> for [A; LENGTH as usize] wher
     }
 }
 
-
-
 impl<const LENGTH: usize> BoundedIndex<LENGTH> {
     pub const fn assert_range_ok(value: usize) {
         assert!(value < LENGTH, "Value out of bounds");
     }
 
     pub const fn from_const<const N: usize>() -> Self {
-        const {
-            Self::assert_range_ok(N)
-        }
+        const { Self::assert_range_ok(N) }
 
         Self(N)
     }

@@ -1,15 +1,16 @@
-use core::{any::Any, marker::PhantomData, mem::MaybeUninit};
+use core::marker::PhantomData;
 
 use dxkb_common::{
-    dev_debug, dev_error, dev_info, dev_trace, dev_warn, util::{BitMatrix, BitMatrixLayout, BoundedIndex, BoundedU8, ColBitMatrixLayout, IsTrue, ConstCond}, KeyState
+    KeyState, dev_debug, dev_error, dev_info, dev_trace, dev_warn,
+    util::{BitMatrix, BitMatrixLayout, BoundedU8, ColBitMatrixLayout, ConstCond, IsTrue},
 };
-use dxkb_peripheral::key_matrix::{KeyMatrix, KeyMatrixLike};
+use dxkb_peripheral::key_matrix::KeyMatrixLike;
 use dxkb_split_link::SplitBusLike;
 use heapless::Vec;
-use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
+use ringbuffer::RingBuffer;
 use serde::{Deserialize, Serialize};
 use stm32f4xx_hal::{
-    gpio::{Input, Pin, PinMode, PinPull, Pull},
+    gpio::{PinPull, Pull},
     hal::digital::InputPin,
 };
 use usb_device::{
@@ -142,7 +143,7 @@ pub struct SplitKeyboard<
     [(); LLAYERS as usize]:,
     [(); LCOLS as usize]:,
     [(); LROWS as usize]:,
-    ConstCond<{LLAYERS > 0}>: IsTrue,
+    ConstCond<{ LLAYERS > 0 }>: IsTrue,
 {
     usb_device: UsbDevice<'usb, USB>,
     kbd_hid: HIDClass<'usb, USB>,
@@ -157,7 +158,7 @@ pub struct SplitKeyboard<
 
     _side: PhantomData<Side>,
     _layout_config: PhantomData<LayoutConfig>,
-    _user: PhantomData<User>
+    _user: PhantomData<User>,
 }
 
 impl<
@@ -174,7 +175,7 @@ impl<
     Matrix,
     MasterTester,
     SplitBus,
-    User
+    User,
 >
     SplitKeyboard<
         'usb,
@@ -190,7 +191,7 @@ impl<
         Matrix,
         MasterTester,
         SplitBus,
-        User
+        User,
     >
 where
     CurSide: SideLayoutOffset<LayoutConfig>,
@@ -205,7 +206,7 @@ where
     [(); LLAYERS as usize]:,
     [(); LCOLS as usize]:,
     [(); LROWS as usize]:,
-    ConstCond<{LLAYERS > 0}>: IsTrue,
+    ConstCond<{ LLAYERS > 0 }>: IsTrue,
 {
     const fn assert_config_ok() {
         assert!(
@@ -266,7 +267,7 @@ where
             hid_report: KeyboardReportHolder::new(),
             _side: PhantomData,
             _layout_config: PhantomData,
-            _user: PhantomData
+            _user: PhantomData,
         }
     }
 
@@ -289,7 +290,10 @@ where
             .set_real_key_state(real_row, real_col, current_state);
 
         if changed {
-            let key: Key = self.layout.get_key_definition(self.state.current_layer, real_row, real_col).clone();
+            let key: Key = self
+                .layout
+                .get_key_definition(self.state.current_layer, real_row, real_col)
+                .clone();
             key.handle_key_state_change::<_, Self>(self, user, current_state);
         }
     }
@@ -308,7 +312,7 @@ where
                         row,
                         col,
                         self.matrix.get_key_state(row, col),
-                        user
+                        user,
                     );
                 }
             }
@@ -323,24 +327,15 @@ where
                         row,
                         col,
                         KeyState::Pressed,
-                        user
+                        user,
                     );
                 }
                 SplitKeyboardLinkMessage::MatrixKeyUp { row, col } => {
                     self.layout_update_key_state::<CurSide::Opposite>(
-
-
-
-
-
-
-
-
-
                         row,
                         col,
                         KeyState::Released,
-                        user
+                        user,
                     );
                 }
             }
@@ -362,7 +357,6 @@ where
             // the report, even when there's now pressed keys. But it will work for now.
             self.hid_report.reset_keycodes();
         }
-
 
         if self.hid_report.is_dirty() {
             // TODO This method writes to the USB FIFO once we have
@@ -450,12 +444,21 @@ const ROLLED_OVER_KEYBOARD_REPORT: KeyboardReport = KeyboardReport {
 pub struct KeyboardReportHolder {
     report: KeyboardReport,
     rollover: bool,
-    dirty: bool
+    dirty: bool,
 }
 
 impl KeyboardReportHolder {
     const fn new() -> Self {
-        KeyboardReportHolder { report: KeyboardReport { modifier: 0, reserved: 0, leds: 0, keycodes: [0u8; 6] }, rollover: false, dirty: false }
+        KeyboardReportHolder {
+            report: KeyboardReport {
+                modifier: 0,
+                reserved: 0,
+                leds: 0,
+                keycodes: [0u8; 6],
+            },
+            rollover: false,
+            dirty: false,
+        }
     }
 
     pub fn rolled_over(&self) -> bool {
@@ -471,7 +474,7 @@ impl KeyboardReportHolder {
     }
 
     pub fn is_dirty(&self) -> bool {
-        return self.dirty
+        return self.dirty;
     }
 
     pub fn clear_dirty(&mut self) {
@@ -528,9 +531,9 @@ impl<
     Matrix,
     MasterTester,
     SplitBus,
-    User
-> SplitKeyboardLike<KeyboardState<Key, LLAYERS, LROWS, LCOLS>> for
-    SplitKeyboard<
+    User,
+> SplitKeyboardLike<KeyboardState<Key, LLAYERS, LROWS, LCOLS>>
+    for SplitKeyboard<
         'usb,
         LLAYERS,
         LROWS,
@@ -544,7 +547,7 @@ impl<
         Matrix,
         MasterTester,
         SplitBus,
-        User
+        User,
     >
 where
     CurSide: SideLayoutOffset<LayoutConfig>,
@@ -559,8 +562,8 @@ where
     [(); LLAYERS as usize]:,
     [(); LCOLS as usize]:,
     [(); LROWS as usize]:,
-    ConstCond<{LLAYERS > 0}>: IsTrue, {
-
+    ConstCond<{ LLAYERS > 0 }>: IsTrue,
+{
     type User = User;
 
     fn state_mut(&mut self) -> &mut KeyboardState<Key, LLAYERS, LROWS, LCOLS> {
@@ -651,13 +654,17 @@ pub trait HandleKey: Sized + Clone {
     /// run any action or mutation over the keyboard state. This function MUST
     /// NOT update the keyboard HID report. For that, use
     /// [`update_keyboard_report`].
-    fn handle_key_state_change<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(&self, kb: &mut Kb, user: &mut Self::User, key_state: KeyState);
+    fn handle_key_state_change<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
+        &self,
+        kb: &mut Kb,
+        user: &mut Self::User,
+        key_state: KeyState,
+    );
 
     // TODO Maybe have a function like this to separate the key state change from the keyboard report update.
     //  By doing that we might be able to create mechanisms for exiting from a rollover condition.
     // fn update_keyboard_report<S, Kb: SplitKeyboardLike<S>>(&self, kb: &mut Kb, user: &mut Kb::User, key_state: KeyState);
 }
-
 
 pub trait KeyboardStateLike {
     fn push_layer_raw(&mut self, new_layer: u8) -> bool;
@@ -672,7 +679,7 @@ where
     [(); LAYERS as usize]:,
     [(); COLS as usize]:,
     [(); ROWS as usize]:,
-    ConstCond<{LAYERS > 0}>: IsTrue,
+    ConstCond<{ LAYERS > 0 }>: IsTrue,
 {
     // Since ringbuffer doesn't implement any kind of "pop" operation
     // for dropping the most recently added element, for now I'm using
@@ -685,7 +692,6 @@ where
     // bounded more than once to multiple keys in the matrix. However, this would
     // be costly in terms of memory and access time, so I'm leaving just the
     // matrix for now.
-
     /// The matrix holding the states of each key. This matrix holds not only
     /// the local pressed keys, like the key matrix controller, but also the
     /// states of the remote peer side.
@@ -696,19 +702,26 @@ where
 
     /// The number of logical keys pressed right now.
     pressed_key_count: u8,
-    _phantom: PhantomData<K>
+    _phantom: PhantomData<K>,
 }
 
-impl<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8> KeyboardState<K, LAYERS, ROWS, COLS>
+impl<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8>
+    KeyboardState<K, LAYERS, ROWS, COLS>
 where
     ColBitMatrixLayout<COLS>: BitMatrixLayout,
     [(); LAYERS as usize]:,
     [(); COLS as usize]:,
     [(); ROWS as usize]:,
-    ConstCond<{LAYERS > 0}>: IsTrue,
+    ConstCond<{ LAYERS > 0 }>: IsTrue,
 {
     pub const fn new() -> Self {
-        Self { layers_stack: Vec::new(), matrix_state: BitMatrix::<{ROWS as usize}, COLS>::new(), current_layer: BoundedU8::ZERO, _phantom: PhantomData, pressed_key_count: 0 }
+        Self {
+            layers_stack: Vec::new(),
+            matrix_state: BitMatrix::<{ ROWS as usize }, COLS>::new(),
+            current_layer: BoundedU8::ZERO,
+            _phantom: PhantomData,
+            pressed_key_count: 0,
+        }
     }
 
     #[inline(always)]
@@ -748,13 +761,15 @@ where
     }
 }
 
-impl<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8> KeyboardStateLike for KeyboardState<K, LAYERS, ROWS, COLS>
+impl<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8> KeyboardStateLike
+    for KeyboardState<K, LAYERS, ROWS, COLS>
 where
     ColBitMatrixLayout<COLS>: BitMatrixLayout,
     [(); LAYERS as usize]:,
     [(); COLS as usize]:,
     [(); ROWS as usize]:,
-    ConstCond<{LAYERS > 0}>: IsTrue, {
+    ConstCond<{ LAYERS > 0 }>: IsTrue,
+{
     fn push_layer_raw(&mut self, new_layer: u8) -> bool {
         let Some(layer_index) = BoundedU8::from_value(new_layer) else {
             dev_warn!("Requested new layer out of bounds: {}", new_layer);

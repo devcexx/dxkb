@@ -143,7 +143,7 @@ pub enum FrameDecodeError {
 #[derive(Debug)]
 pub enum TransferError {
     BufferOverflow,
-    LinkDown
+    LinkDown,
 }
 
 impl<M> FrameContentEnvelope<M> {

@@ -1,5 +1,4 @@
 use core::{
-    arch::asm,
     marker::PhantomData,
     sync::atomic::{Ordering, fence},
 };

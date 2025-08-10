@@ -8,10 +8,12 @@
 
 use core::marker::PhantomData;
 
-use dxkb_core::keyboard::{AlwaysMaster, AlwaysSlave, LayoutLayer, Left, PinMasterSense, Right};
+use dxkb_core::keyboard::{AlwaysMaster, Left};
 
 #[cfg(not(any(feature = "side-right", feature = "side-left")))]
-compile_error!("Not side has been specified. Either side-left or side-right feature must be enabled!");
+compile_error!(
+    "Not side has been specified. Either side-left or side-right feature must be enabled!"
+);
 
 #[cfg(all(feature = "side-right", feature = "side-left"))]
 compile_error!("Only side-left or side-right features must be enabled at a time!");
@@ -25,7 +27,7 @@ pub trait UseTypeLike {
 
 pub struct UseType<P, T> {
     _p: PhantomData<P>,
-    _t: PhantomData<T>
+    _t: PhantomData<T>,
 }
 
 impl<P, T> UseTypeLike for UseType<P, T> {
