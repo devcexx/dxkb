@@ -178,16 +178,19 @@ fn init_key_matrix(rows: KeyMatrixRowPins, cols: KeyMatrixColPins, clocks: &Cloc
 #[rustfmt::skip]
 fn build_keyboard_layout() -> LayoutT {
     LayoutT::new(
-        dxkb_proc_macros::layers![
-            {
-                name: "base",
-                rows: [
-                    ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
-                    ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
-                    ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', f:PshLyr(1)],
-                ]
-            }
-        ]
+        dxkb_proc_macros::layers!(
+            alias_resolver: dxkb_core::default_key_from_alias,
+            layers: [
+                {
+                    name: "base",
+                    rows: [
+                        ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+                        ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
+                        ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', f:PshLyr(1)],
+                    ]
+                }
+            ]
+        )
     )
 }
 
