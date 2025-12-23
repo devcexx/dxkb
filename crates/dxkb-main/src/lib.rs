@@ -8,7 +8,8 @@
 
 use core::marker::PhantomData;
 
-use dxkb_core::keyboard::{AlwaysMaster, Left};
+use dxkb_core::keyboard::{AlwaysMaster, Left, PinMasterSense};
+use stm32f4xx_hal::{gpio::PinPull, hal::digital::InputPin};
 
 #[cfg(not(any(feature = "side-right", feature = "side-left")))]
 compile_error!(
@@ -49,7 +50,7 @@ pub type MasterCheckType<P> = <UseType<P, AlwaysSlave> as UseTypeLike>::Target;
 #[cfg(not(any(feature = "usb-force-master", feature = "usb-force-slave")))]
 pub type MasterCheckType<P> = PinMasterSense<P>;
 
-pub fn make_usb_master_checker<P>(p: P) -> MasterCheckType<P> {
+pub fn make_usb_master_checker<P: InputPin + PinPull>(p: P) -> MasterCheckType<P> {
     #[cfg(feature = "usb-force-master")]
     return AlwaysMaster;
 
