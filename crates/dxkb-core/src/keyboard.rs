@@ -7,7 +7,6 @@ use dxkb_common::{
 use dxkb_peripheral::key_matrix::KeyMatrixLike;
 use dxkb_split_link::SplitBusLike;
 use heapless::Vec;
-use ringbuffer::RingBuffer;
 use serde::{Deserialize, Serialize};
 use stm32f4xx_hal::{
     gpio::{PinPull, Pull},
@@ -16,7 +15,7 @@ use stm32f4xx_hal::{
 use usb_device::{
     LangID,
     bus::{UsbBus, UsbBusAllocator},
-    device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
+    device::{StringDescriptors, UsbDeviceBuilder, UsbVidPid},
 };
 use usbd_hid::{
     UsbError,
@@ -28,6 +27,8 @@ use usbd_hid::{
 
 // Re-export it to be used for macros without needing to reference the usbd-hid crate.
 pub use usbd_hid::descriptor::KeyboardUsage;
+
+use crate::hid::HidKeyboard;
 
 pub trait MasterCheck {
     fn is_current_master(&mut self) -> bool;
@@ -118,20 +119,20 @@ impl SplitKeyboardSideType for Right {
 
 pub trait SplitKeyboardLike<State> {
     type User;
+    type Hid: HidKeyboard;
 
     fn state_mut(&mut self) -> &mut State;
-    fn hid_report_mut(&mut self) -> &mut KeyboardReportHolder;
+    fn hid_report_mut(&mut self) -> &mut Self::Hid;
 }
 
 pub struct SplitKeyboard<
-    'usb,
     const LLAYERS: u8,
     const LROWS: u8,
     const LCOLS: u8,
     const MROWS: u8,
     const MCOLS: u8,
     Side: SplitKeyboardSideType,
-    USB: UsbBus,
+    Hid: HidKeyboard,
     LayoutConfig: SplitLayoutConfig,
     Key: HandleKey,
     Matrix: KeyMatrixLike<MROWS, MCOLS>,
@@ -145,8 +146,6 @@ pub struct SplitKeyboard<
     [(); LROWS as usize]:,
     ConstCond<{ LLAYERS > 0 }>: IsTrue,
 {
-    usb_device: UsbDevice<'usb, USB>,
-    kbd_hid: HIDClass<'usb, USB>,
     matrix: Matrix,
     layout: SplitKeyboardLayout<LayoutConfig, Key, LLAYERS, LROWS, LCOLS>,
     state: KeyboardState<Key, LLAYERS, LROWS, LCOLS>,
@@ -154,7 +153,7 @@ pub struct SplitKeyboard<
     master_tester: MasterTester,
     is_master: bool,
 
-    hid_report: KeyboardReportHolder,
+    hid: Hid,
 
     _side: PhantomData<Side>,
     _layout_config: PhantomData<LayoutConfig>,
@@ -162,14 +161,13 @@ pub struct SplitKeyboard<
 }
 
 impl<
-    'usb,
     const LLAYERS: u8,
     const LROWS: u8,
     const LCOLS: u8,
     const MROWS: u8,
     const MCOLS: u8,
     CurSide,
-    USB,
+    Hid,
     LayoutConfig,
     Key,
     Matrix,
@@ -178,14 +176,13 @@ impl<
     User,
 >
     SplitKeyboard<
-        'usb,
         LLAYERS,
         LROWS,
         LCOLS,
         MROWS,
         MCOLS,
         CurSide,
-        USB,
+        Hid,
         LayoutConfig,
         Key,
         Matrix,
@@ -196,7 +193,7 @@ impl<
 where
     CurSide: SideLayoutOffset<LayoutConfig>,
     CurSide::Opposite: SideLayoutOffset<LayoutConfig>,
-    USB: UsbBus,
+    Hid: HidKeyboard,
     LayoutConfig: SplitLayoutConfig,
     Key: HandleKey<User = User>,
     ColBitMatrixLayout<LCOLS>: BitMatrixLayout,
@@ -220,7 +217,7 @@ where
     }
 
     pub fn new(
-        usb_allocator: &'usb UsbBusAllocator<USB>,
+        hid: Hid,
         layout: SplitKeyboardLayout<LayoutConfig, Key, LLAYERS, LROWS, LCOLS>,
         matrix: Matrix,
         split_bus: SplitBus,
@@ -230,41 +227,39 @@ where
 
         // TODO Unhardcode settings and strings
 
-        let kbd_hid = HIDClass::new_ep_in_with_settings(
-            &usb_allocator,
-            &KeyboardReport::desc(),
-            1,
-            HidClassSettings {
-                subclass: HidSubClass::NoSubClass,
-                protocol: HidProtocol::Keyboard,
-                config: ProtocolModeConfig::DefaultBehavior,
-                locale: HidCountryCode::Spanish,
-            },
-        );
+        // let kbd_hid = HIDClass::new_ep_in_with_settings(
+        //     &usb_allocator,
+        //     &KeyboardReport::desc(),
+        //     1,
+        //     HidClassSettings {
+        //         subclass: HidSubClass::NoSubClass,
+        //         protocol: HidProtocol::Keyboard,
+        //         config: ProtocolModeConfig::DefaultBehavior,
+        //         locale: HidCountryCode::Spanish,
+        //     },
+        // );
 
-        let usb_dev = UsbDeviceBuilder::new(usb_allocator, UsbVidPid(0x16c0, 0x27db))
-            .device_class(0x3) // HID Device
-            .device_sub_class(HidSubClass::NoSubClass as u8) // No subclass
-            .device_protocol(HidProtocol::Generic as u8)
-            .usb_rev(usb_device::device::UsbRev::Usb200)
-            .strings(&[StringDescriptors::new(LangID::ES)
-                .serial_number("0")
-                .manufacturer("Dobetito")
-                .product("DXKB Lily58L")])
-            .unwrap()
-            .supports_remote_wakeup(true)
-            .build();
+        // let usb_dev = UsbDeviceBuilder::new(usb_allocator, UsbVidPid(0x16c0, 0x27db))
+        //     .device_class(0x3) // ,HID Device
+        //     .device_sub_class(HidSubClass::NoSubClass as u8) // No subclass
+        //     .device_protocol(HidProtocol::Generic as u8)
+        //     .usb_rev(usb_device::device::UsbRev::Usb200)
+        //     .strings(&[StringDescriptors::new(LangID::ES)
+        //         .serial_number("0")
+        //         .manufacturer("Dobetito")
+        //         .product("DXKB Lily58L")])
+        //     .unwrap()
+        //     .supports_remote_wakeup(true)
+        //     .build();
 
         Self {
-            usb_device: usb_dev,
-            kbd_hid,
+            hid,
             matrix,
             layout,
             state: KeyboardState::new(),
             split_bus,
             master_tester,
             is_master: false,
-            hid_report: KeyboardReportHolder::new(),
             _side: PhantomData,
             _layout_config: PhantomData,
             _user: PhantomData,
@@ -341,45 +336,16 @@ where
             }
         }
 
-        if self.usb_device.poll(&mut [&mut self.kbd_hid]) {
-            // TODO do something with this
-            let mut reportbuf = [0u8; size_of::<KeyboardReport>()];
-            if let Ok(report) = self.kbd_hid.pull_raw_report(&mut reportbuf) {
-                dev_debug!("Report received: {:?}", report);
-            }
+        match self.hid.poll() {
+            Ok(new_data) => {
+               // dev_debug!("Received report.");
+            },
+            Err(e) => {
+                dev_error!("Usb stalled: {e}");
+            },
         }
 
-        if self.hid_report.rolled_over() && self.state.pressed_key_count == 0 {
-            // No keys pressed. Reset error condition
-
-            // TODO This is somewhat incoherent with the HandleKey trait
-            // definition, that allows to modify arbitrarily the keys sent on
-            // the report, even when there's now pressed keys. But it will work for now.
-            self.hid_report.reset_keycodes();
-        }
-
-        if self.hid_report.is_dirty() {
-            // TODO This method writes to the USB FIFO once we have
-            // data ready to be sent, but not when the host requests
-            // it. This means that, when the host requests it, there
-            // might be some outdated information in the Tx FIFO that
-            // will be sent. Eventually could be interesting to flush
-            // the TX FIFO before sending, by writing to the TXFFLSH
-            // register.
-            match self.kbd_hid.push_input(self.hid_report.report()) {
-                Ok(_) => {
-                    self.hid_report.clear_dirty();
-                }
-                Err(UsbError::WouldBlock) => {
-                    // Do nothing, leave the report there until we are able to
-                    // send it. The dirty flag is kept set until we're able to
-                    // transfer it.
-                }
-                Err(e) => {
-                    dev_error!("USB xfer error failed: {:?}", e);
-                }
-            }
-        }
+        self.hid.poll();
     }
 
     fn poll_slave(&mut self) {
@@ -438,7 +404,7 @@ const ROLLED_OVER_KEYBOARD_REPORT: KeyboardReport = KeyboardReport {
     modifier: 0,
     reserved: 0,
     leds: 0,
-    keycodes: [KeyboardUsage::KeyboardErrorRollOver as u8, 0, 0, 0, 0, 0],
+    keycodes: [KeyboardUsage::KeyboardErrorRollOver as u8; 6],
 };
 
 pub struct KeyboardReportHolder {
@@ -518,14 +484,13 @@ impl KeyboardReportHolder {
 }
 
 impl<
-    'usb,
     const LLAYERS: u8,
     const LROWS: u8,
     const LCOLS: u8,
     const MROWS: u8,
     const MCOLS: u8,
     CurSide,
-    USB,
+    Hid,
     LayoutConfig,
     Key,
     Matrix,
@@ -534,14 +499,13 @@ impl<
     User,
 > SplitKeyboardLike<KeyboardState<Key, LLAYERS, LROWS, LCOLS>>
     for SplitKeyboard<
-        'usb,
         LLAYERS,
         LROWS,
         LCOLS,
         MROWS,
         MCOLS,
         CurSide,
-        USB,
+        Hid,
         LayoutConfig,
         Key,
         Matrix,
@@ -552,7 +516,7 @@ impl<
 where
     CurSide: SideLayoutOffset<LayoutConfig>,
     CurSide::Opposite: SideLayoutOffset<LayoutConfig>,
-    USB: UsbBus,
+    Hid: HidKeyboard,
     LayoutConfig: SplitLayoutConfig,
     Key: HandleKey<User = User>,
     ColBitMatrixLayout<LCOLS>: BitMatrixLayout,
@@ -565,13 +529,14 @@ where
     ConstCond<{ LLAYERS > 0 }>: IsTrue,
 {
     type User = User;
+    type Hid = Hid;
 
     fn state_mut(&mut self) -> &mut KeyboardState<Key, LLAYERS, LROWS, LCOLS> {
         &mut self.state
     }
 
-    fn hid_report_mut(&mut self) -> &mut KeyboardReportHolder {
-        &mut self.hid_report
+    fn hid_report_mut(&mut self) -> &mut Hid {
+        &mut self.hid
     }
 }
 

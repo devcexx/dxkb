@@ -1,7 +1,7 @@
 use dxkb_common::{KeyState, dev_info, dev_warn};
 use usbd_hid::descriptor::KeyboardUsage;
 
-use crate::keyboard::{HandleKey, KeyboardStateLike, SplitKeyboardLike};
+use crate::{hid::HidKeyboard, keyboard::{HandleKey, KeyboardStateLike, SplitKeyboardLike}};
 
 macro_rules! do_on_state {
     ($st:ident, $on_pressed:tt, $on_released:tt) => {
@@ -21,8 +21,8 @@ pub fn standard_key_handle<S, Kb: SplitKeyboardLike<S>>(
     key: KeyboardUsage,
     key_state: KeyState,
 ) {
-    do_on_state!(key_state, { kb.hid_report_mut().add_key(key) }, {
-        kb.hid_report_mut().rm_key(key)
+    do_on_state!(key_state, { kb.hid_report_mut().press_key(key) }, {
+        kb.hid_report_mut().release_key(key)
     });
 }
 

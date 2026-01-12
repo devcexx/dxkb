@@ -30,6 +30,7 @@ usbd-hid = { workspace = true }
 vcell = { workspace = true }
 crabtime = { workspace = true }
 heapless = { workspace = true }
+zerocopy = { workspace = true }
 
 [build-dependencies]
 usbd-hid = "0.8.2"
