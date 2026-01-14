@@ -31,6 +31,7 @@ vcell = { workspace = true }
 crabtime = { workspace = true }
 heapless = { workspace = true }
 zerocopy = { workspace = true }
+bitflags.workspace = true
 
 [build-dependencies]
 usbd-hid = "0.8.2"

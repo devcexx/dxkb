@@ -19,7 +19,7 @@ pub struct BitArray<const N: usize> where [(); BitArraySize::<N>::SIZE]: {
 }
 
 impl<const N: usize> BitArray<N> where [(); BitArraySize::<N>::SIZE]: {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             buf: [0; BitArraySize::<N>::SIZE]
         }
