@@ -26,6 +26,16 @@ pub fn standard_key_handle<S, Kb: SplitKeyboardLike<S>>(
     });
 }
 
+pub fn consumer_control_key_handle<S, Kb: SplitKeyboardLike<S>>(
+    kb: &mut Kb,
+    key: u16,
+    key_state: KeyState,
+) {
+    do_on_state!(key_state, { kb.hid_report_mut().press_consumer_control_key(key) }, {
+        kb.hid_report_mut().release_consumer_control_key(key)
+    });
+}
+
 pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
     kb: &mut Kb,
     key: &BuiltinFunctionKey,
@@ -108,6 +118,7 @@ pub enum DefaultKey {
     NoOp,
     Standard(KeyboardUsage),
     Function(BuiltinFunctionKey),
+    ConsumerControl(u16)
 }
 
 impl From<KeyboardUsage> for DefaultKey {
@@ -133,6 +144,9 @@ impl HandleKey for DefaultKey {
             DefaultKey::Function(builtin_function_key) => {
                 function_key_handle(kb, builtin_function_key, key_state);
             }
+            DefaultKey::ConsumerControl(key) => {
+                consumer_control_key_handle(kb, *key, key_state);
+            },
         }
     }
 }
@@ -272,4 +286,9 @@ macro_rules! default_key_from_alias {
     ($other:tt) => {
         $crate::keys::DefaultKey::Standard($crate::hid_key_from_alias!($other))
     };
+
+    // Testing
+    (c:VolUp) => {
+        $crate::keys::DefaultKey::ConsumerControl(0xe9)
+    }
 }

@@ -187,7 +187,7 @@ fn build_keyboard_layout() -> LayoutT {
                 {
                     name: "base",
                     rows: [
-                        ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+                        [c:VolUp, 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
                         [LeftControl, 'S', RightControl, 'F', 'G', 'H', 'J', 'K', 'L', ';'],
                         ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', f:PshLyr(1)],
                     ]

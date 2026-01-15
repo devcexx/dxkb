@@ -3,19 +3,15 @@ use zerocopy::{FromBytes, Immutable, IntoBytes};
 macro_rules! const_num_impl {
     ($tname:ident, $ttraitname:ident, $ntype:ty) => {
         pub trait $ttraitname {
+            const I: Self;
             const N: $ntype;
         }
 
         #[derive(Clone, Copy, FromBytes, IntoBytes, Immutable, PartialEq, Eq, PartialOrd, Ord)]
         #[repr(transparent)]
         pub struct $tname<const N: $ntype>($ntype);
-        impl<const N: $ntype> $tname<N> {
-            pub const fn new() -> Self {
-                $tname(N)
-            }
-        }
-
         impl<const N: $ntype> $ttraitname for $tname<N> {
+            const I: Self = $tname(N);
             const N: $ntype = N;
         }
 
