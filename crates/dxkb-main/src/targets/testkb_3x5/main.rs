@@ -20,7 +20,9 @@ use core::any::type_name;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 
+use dxkb_common::bus::NullBus;
 use dxkb_common::dev_info;
+use dxkb_core::hid::{BasicKeyboardSettings, ReportHidKeyboard};
 use dxkb_core::keys::DefaultKey;
 use dxkb_core::keyboard::{
     SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig,
@@ -51,6 +53,8 @@ use stm32f4xx_hal::{
 };
 use synopsys_usb_otg::UsbBus;
 use usb_device::bus::UsbBusAllocator;
+use usb_device::device::{StringDescriptors, UsbVidPid};
+use usb_device::LangID;
 
 // The total layers of the layout.
 const LAYERS: u8 = 1;
@@ -106,21 +110,20 @@ type SplitBusDmaPeripheral = DMA2;
 type SplitBusTxDmaStream = Stream7<SplitBusDmaPeripheral>;
 type SplitBusRxDmaStream = Stream5<SplitBusDmaPeripheral>;
 
-type SplitBusUart =
-    UartDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4, 256, 128>;
+type SplitBusUart = NullBus;
+    //artDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4, 256, 128>;
 type SplitBusT = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUart, DWTClock, 32>;
 
 type LayoutT =
     SplitKeyboardLayout<KeyboardLayoutConfig, DefaultKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
-type KeyboardT<'usb, USB> = SplitKeyboard<
-    'usb,
+type KeyboardT<Hid> = SplitKeyboard<
     LAYERS,
     LAYOUT_ROWS,
     LAYOUT_COLS,
     SIDE_ROWS,
     SIDE_COLS,
     CurrentSide,
-    USB,
+    Hid,
     KeyboardLayoutConfig,
     DefaultKey,
     KeyMatrixT,
@@ -132,7 +135,7 @@ type KeyboardT<'usb, USB> = SplitKeyboard<
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 static mut SPLIT_BUS_DMA_RX_BUF: DmaRingBuffer<256, 128> = DmaRingBuffer::new();
 static mut SPLIT_BUS_DMA_TX_BUF: [u8; 256] = [0u8; 256];
-static mut KEYBOARD: MaybeUninit<KeyboardT<UsbBus<USB>>> = MaybeUninit::uninit();
+static mut KEYBOARD: MaybeUninit<KeyboardT<ReportHidKeyboard<UsbBus<USB>>>> = MaybeUninit::uninit();
 static mut USB_ALLOC: MaybeUninit<UsbBusAllocator<UsbBus<USB>>> = MaybeUninit::uninit();
 
 struct KeyboardLayoutConfig;
@@ -162,7 +165,7 @@ fn init_split_bus(
         &clocks,
     );
 
-    SplitBus::new(uart_dma, clock)
+    SplitBus::new(NullBus, clock)
 }
 
 fn init_key_matrix(rows: KeyMatrixRowPins, cols: KeyMatrixColPins, clocks: &Clocks) -> KeyMatrixT {
@@ -238,6 +241,15 @@ fn main0() -> ! {
         }))
     };
 
+    let hid = ReportHidKeyboard::alloc(usb_alloc, &BasicKeyboardSettings {
+        vid_pid: UsbVidPid(0x16c0, 0x27db),
+        string_descriptors: &[StringDescriptors::new(LangID::ES)
+            .serial_number("0")
+            .manufacturer("devcexx")
+            .product("dxkb testkb_3x5")],
+        poll_ms: 1,
+    });
+
     let matrix = init_key_matrix(
         (
             gpiob.pb10.into_push_pull_output(),
@@ -258,7 +270,7 @@ fn main0() -> ! {
     let master_tester = make_usb_master_checker(gpioa.pa9.into_input());
     unsafe {
         KEYBOARD.write(KeyboardT::new(
-            usb_alloc,
+            hid,
             build_keyboard_layout(),
             matrix,
             split_bus,
@@ -281,10 +293,10 @@ fn main0() -> ! {
 #[interrupt]
 fn USART1() {
     unsafe {
-        KEYBOARD
-            .assume_init_ref()
-            .split_bus
-            .bus()
-            .handle_usart_intr();
+        // KEYBOARD
+        //     .assume_init_ref()
+        //     .split_bus
+        //     .bus()
+        //     .handle_usart_intr();
     }
 }

@@ -18,3 +18,4 @@ dev-log-level-trace = ["__dev_log_enable_level_error", "__dev_log_enable_level_w
 [dependencies]
 log = { workspace = true }
 crabtime = { workspace = true }
+zerocopy = { workspace = true }

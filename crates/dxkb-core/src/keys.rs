@@ -1,7 +1,8 @@
 use dxkb_common::{KeyState, dev_info, dev_warn};
+use hut::Consumer;
 use usbd_hid::descriptor::KeyboardUsage;
 
-use crate::keyboard::{HandleKey, KeyboardStateLike, SplitKeyboardLike};
+use crate::{hid::HidKeyboard, keyboard::{HandleKey, KeyboardStateLike, SplitKeyboardLike}};
 
 macro_rules! do_on_state {
     ($st:ident, $on_pressed:tt, $on_released:tt) => {
@@ -21,8 +22,18 @@ pub fn standard_key_handle<S, Kb: SplitKeyboardLike<S>>(
     key: KeyboardUsage,
     key_state: KeyState,
 ) {
-    do_on_state!(key_state, { kb.hid_report_mut().add_key(key) }, {
-        kb.hid_report_mut().rm_key(key)
+    do_on_state!(key_state, { kb.hid_report_mut().press_key(key) }, {
+        kb.hid_report_mut().release_key(key)
+    });
+}
+
+pub fn consumer_control_key_handle<S, Kb: SplitKeyboardLike<S>>(
+    kb: &mut Kb,
+    key: Consumer,
+    key_state: KeyState,
+) {
+    do_on_state!(key_state, { kb.hid_report_mut().press_consumer_control_key(key) }, {
+        kb.hid_report_mut().release_consumer_control_key(key)
     });
 }
 
@@ -108,6 +119,7 @@ pub enum DefaultKey {
     NoOp,
     Standard(KeyboardUsage),
     Function(BuiltinFunctionKey),
+    ConsumerControl(Consumer)
 }
 
 impl From<KeyboardUsage> for DefaultKey {
@@ -133,6 +145,9 @@ impl HandleKey for DefaultKey {
             DefaultKey::Function(builtin_function_key) => {
                 function_key_handle(kb, builtin_function_key, key_state);
             }
+            DefaultKey::ConsumerControl(key) => {
+                consumer_control_key_handle(kb, *key, key_state);
+            },
         }
     }
 }
@@ -249,26 +264,58 @@ macro_rules! hid_key_from_alias {
 }
 
 #[macro_export]
+macro_rules! function_key_from_alias {
+    (PshNxtLyr) => {
+        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushNextLayer)
+    };
+    (PshLyr($layer:literal)) => {
+        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushLayer($layer))
+    };
+    (PopLyr) => {
+        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PopLayer)
+    };
+    (PshNxtLyrT) => {
+        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushNextLayerTransient)
+    };
+    (PshLyrT($layer:literal)) => {
+        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushLayerTransient($layer))
+    };
+}
+
+#[macro_export]
+macro_rules! consumer_control_usage_from_alias {
+    // Some basic aliases for common keys
+    (VolUp) => { ::hut::Consumer::VolumeIncrement };
+    (VolDown) => { ::hut::Consumer::VolumeDecrement };
+    (Pwr) => { ::hut::Consumer::Power };
+    (Rst) => { ::hut::Consumer::Restart };
+    (Sleep) => { ::hut::Consumer::Sleep };
+    (BrightUp) => { ::hut::Consumer::DisplayBrightnessIncrement };
+    (BrightDown) => { ::hut::Consumer::DisplayBrightnessDecrement };
+    (PlayPause) => { ::hut::Consumer::PlayPause };
+    (Next) => { ::hut::Consumer::ScanNextTrack };
+    (Prev) => { ::hut::Consumer::ScanPreviousTrack };
+
+    // Just delegate on the names defined by the HID spec.
+    ($id:ident) => {
+        ::hut::Consumer::$id
+    };
+}
+
+#[macro_export]
 macro_rules! default_key_from_alias {
     (_) => {
         $crate::keys::DefaultKey::NoOp
     };
 
-    (f:PshNxtLyr) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushNextLayer)
+    (f:$($f:tt)*) => {
+        $crate::function_key_from_alias!($($f)*)
     };
-    (f:PshLyr($layer:literal)) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushLayer($layer))
+
+    (c:$($cc:tt)*) => {
+        $crate::keys::DefaultKey::ConsumerControl($crate::consumer_control_usage_from_alias!($($cc)*))
     };
-    (f:PopLyr) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PopLayer)
-    };
-    (f:PshNxtLyrT) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushNextLayerTransient)
-    };
-    (f:PshLyrT($layer:literal)) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushLayerTransient($layer))
-    };
+
     ($other:tt) => {
         $crate::keys::DefaultKey::Standard($crate::hid_key_from_alias!($other))
     };
