@@ -224,34 +224,6 @@ where
         master_tester: MasterTester,
     ) -> Self {
         const { Self::assert_config_ok() }
-
-        // TODO Unhardcode settings and strings
-
-        // let kbd_hid = HIDClass::new_ep_in_with_settings(
-        //     &usb_allocator,
-        //     &KeyboardReport::desc(),
-        //     1,
-        //     HidClassSettings {
-        //         subclass: HidSubClass::NoSubClass,
-        //         protocol: HidProtocol::Keyboard,
-        //         config: ProtocolModeConfig::DefaultBehavior,
-        //         locale: HidCountryCode::Spanish,
-        //     },
-        // );
-
-        // let usb_dev = UsbDeviceBuilder::new(usb_allocator, UsbVidPid(0x16c0, 0x27db))
-        //     .device_class(0x3) // ,HID Device
-        //     .device_sub_class(HidSubClass::NoSubClass as u8) // No subclass
-        //     .device_protocol(HidProtocol::Generic as u8)
-        //     .usb_rev(usb_device::device::UsbRev::Usb200)
-        //     .strings(&[StringDescriptors::new(LangID::ES)
-        //         .serial_number("0")
-        //         .manufacturer("Dobetito")
-        //         .product("DXKB Lily58L")])
-        //     .unwrap()
-        //     .supports_remote_wakeup(true)
-        //     .build();
-
         Self {
             hid,
             matrix,
@@ -336,16 +308,9 @@ where
             }
         }
 
-        match self.hid.poll() {
-            Ok(new_data) => {
-               // dev_debug!("Received report.");
-            },
-            Err(e) => {
-                dev_error!("Usb stalled: {e}");
-            },
+        if let Err(e) = self.hid.poll() {
+            dev_error!("Usb stalled: {:?}", e);
         }
-
-        self.hid.poll();
     }
 
     fn poll_slave(&mut self) {

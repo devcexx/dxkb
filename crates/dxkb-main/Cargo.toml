@@ -49,3 +49,4 @@ usb-device = { workspace = true }
 usbd-hid = { workspace = true }
 vcell = { workspace = true }
 heapless.workspace = true
+hut.workspace = true

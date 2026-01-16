@@ -31,6 +31,7 @@ crabtime = { git = "https://github.com/wdanilo/crabtime", default-features = fal
 heapless = "0.8.0"
 zerocopy = { version = "0.8.31", features = ["derive"] }
 bitflags = { version = "2.10" }
+hut = { git = "https://github.com/devcexx/hut", default-features = false }
 
 [profile.release-with-debug]
 inherits = "release"

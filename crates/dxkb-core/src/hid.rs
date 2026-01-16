@@ -2,8 +2,9 @@ use core::fmt::{Display, Write};
 
 use bitflags::bitflags;
 use dxkb_common::{
-    dev_error, dev_info, util::{BitArray, ConstU8, ConstU8Like, FromByteArray, FromBytesSized}
+    dev_debug, dev_error, dev_info, dev_trace, util::{BitArray, ConstU8, ConstU8Like, FromByteArray, FromBytesSized}
 };
+use hut::Consumer;
 use usb_device::{
     bus::{UsbBus, UsbBusAllocator},
     device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
@@ -42,10 +43,15 @@ fn lookup_or_find_empty_mut<'a, A>(haystick: &'a mut [A], needle: &'a A, empty: 
     }
 }
 
-pub enum KeyboardKeyChangeError {
+pub enum HidKeyboardPressError {
     Unsupported,
-    InvalidState,
+    AlreadyPressed,
     Rollover
+}
+
+pub enum HidKeyboardReleaseError {
+    Unsupported,
+    NotPressed,
 }
 
 impl From<UsbError> for KeyboardPollError {
@@ -61,39 +67,31 @@ pub enum KeyboardPollError {
     MalformedOutReport,
 }
 
-impl Display for KeyboardPollError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            KeyboardPollError::UsbError(usb_error) => {
-                write!(f, "Usb error: {:?}", usb_error)
-            },
-            KeyboardPollError::UnknownReport(id) => {
-                write!(f, "Unknown report recv from host: {:?}", id)
-            },
-            KeyboardPollError::MalformedOutReport => {
-                write!(f, "Malformed report")
-            },
-        }
-    }
-}
-
 pub struct BasicKeyboardSettings<'s, 'b> {
     pub vid_pid: UsbVidPid,
     pub string_descriptors: &'s [StringDescriptors<'b>],
     pub poll_ms: u8,
 }
 
-/// A type that is capable of syncing the keyboard status with the USB host. Whatever USB implementation, endpoints or keyboard protocol uses under the hood us implementation-specific.
+/// A type that is capable of syncing the keyboard status with the USB host
+/// using the HID standard for data exchange. Whatever USB implementation,
+/// endpoints or keyboard protocol uses under the hood us
+/// implementation-specific.
 pub trait HidKeyboard {
-    fn press_key(&mut self, key: KeyboardUsage) -> Result<(), KeyboardKeyChangeError>;
-    fn release_key(&mut self, key: KeyboardUsage) -> Result<(), KeyboardKeyChangeError>;
+    fn press_key(&mut self, key: KeyboardUsage) -> Result<(), HidKeyboardPressError>;
+    fn release_key(&mut self, key: KeyboardUsage) -> Result<(), HidKeyboardReleaseError>;
 
-    fn press_consumer_control_key(&mut self, key: u16) -> Result<(), KeyboardKeyChangeError>;
-    fn release_consumer_control_key(&mut self, key: u16) -> Result<(), KeyboardKeyChangeError>;
+    fn press_consumer_control_key(&mut self, key: Consumer) -> Result<(), HidKeyboardPressError>;
+    fn release_consumer_control_key(&mut self, key: Consumer) -> Result<(), HidKeyboardReleaseError>;
 
+    /**
+     * Polls changes in the USB device, and transmits changes pending to be
+     * delivered to the host. Returns `true` if an OUT report has been received
+     * from the host, and something has changed in the state of the device due
+     * to that (right now, the only thing that can change is the LEDs).
+     */
     fn poll(&mut self) -> Result<bool, KeyboardPollError>;
-
-    // TODO leds
+    fn leds(&self) -> &BootLeds;
 }
 
 // The linux kernel recognizes ~ 624 consumer control keys. (ref:
@@ -101,8 +99,8 @@ pub trait HidKeyboard {
 // Since we're already in the > 8 bit territory, and it is probably not worth it
 // at this point to start playing with data that is not byte-aligned, just
 // extending the min/max values to comprend the whole CC specification.
-const REPORT_HID_CC_USAGE_MIN: u16 = 0x01;
-const REPORT_HID_CC_USAGE_MAX: u16 = 0x514;
+const REPORT_HID_CC_USAGE_MIN: Consumer = Consumer::ConsumerControl;
+const REPORT_HID_CC_USAGE_MAX: Consumer = Consumer::ContactMisc;
 const REPORT_HID_CC_USAGE_COUNT: usize = (REPORT_HID_CC_USAGE_MAX as usize) - (REPORT_HID_CC_USAGE_MIN as usize) + 1;
 
 
@@ -122,8 +120,8 @@ const _: () = assert!(
 );
 
 type ReportHidKeyboardUsageBitArray = BitArray<REPORT_HID_KB_USAGE_COUNT>;
-type ReportHidKeyboardReportId = ConstU8<5>;
-type ReportHidConsumerControlReportId = ConstU8<4>;
+type ReportHidConsumerControlReportId = ConstU8<1>;
+type ReportHidKeyboardReportId = ConstU8<2>;
 
 const fn u16_lobits(n: u16) -> u8 {
     (n & 0xff) as u8
@@ -145,14 +143,14 @@ const REPORT_HID_KEYBOARD_DESCRIPTOR: [u8; 76] =[
     0x05, 0x0c,                                             // Usage Page (Consumer Devices)
     0x09, 0x01,                                             // Usage (Consumer Control)
     0xa1, 0x01,                                             // Collection (Application)
-    0x85, 0x04,                                             //  Report ID (4)
+    0x85, 0x04,                                             //  Report ID (1)
     0x95, 0x01,                                             //  Report Count (1)
     0x75, 0x08,                                             //  Report Size (8)
     0x81, 0x01,                                             //  Output (Cnst,Arr,Abs) Convenience padding to align the pressed CC keys to 16-bit word.
-    0x1a, u16_lobits(REPORT_HID_CC_USAGE_MIN), u16_hibits(REPORT_HID_CC_USAGE_MIN), //  Usage Minimum (FIXME using a 2-byte tag size so we can always encode the size in two bytes, although it is not necessary for HID)
-    0x2a, u16_lobits(REPORT_HID_CC_USAGE_MAX), u16_hibits(REPORT_HID_CC_USAGE_MAX), //  Usage Maximum
-    0x16, u16_lobits(REPORT_HID_CC_USAGE_MIN), u16_hibits(REPORT_HID_CC_USAGE_MIN), //  Logical Minimum
-    0x26, u16_lobits(REPORT_HID_CC_USAGE_MAX), u16_hibits(REPORT_HID_CC_USAGE_MAX), //  Logical Maximum
+    0x1a, u16_lobits(REPORT_HID_CC_USAGE_MIN as u16), u16_hibits(REPORT_HID_CC_USAGE_MIN as u16), //  Usage Minimum (FIXME using a 2-byte tag size so we can always encode the size in two bytes, although it is not necessary for HID)
+    0x2a, u16_lobits(REPORT_HID_CC_USAGE_MAX as u16), u16_hibits(REPORT_HID_CC_USAGE_MAX as u16), //  Usage Maximum
+    0x16, u16_lobits(REPORT_HID_CC_USAGE_MIN as u16), u16_hibits(REPORT_HID_CC_USAGE_MIN as u16), //  Logical Minimum
+    0x26, u16_lobits(REPORT_HID_CC_USAGE_MAX as u16), u16_hibits(REPORT_HID_CC_USAGE_MAX as u16), //  Logical Maximum
     0x95, 0x1f,                                             //  Report Count (31) 31 reports * 16 bits each = 62 bytes < 64 bytes, leaving space for 1 byte for the report ID.
     0x75, 0x10,                                             //  Report Size (16)
     0x81, 0x00,                                             //  Input (Data,Arr,Abs)
@@ -160,7 +158,7 @@ const REPORT_HID_KEYBOARD_DESCRIPTOR: [u8; 76] =[
     0x05, 0x01,                                             // Usage Page (Generic Desktop)
     0x09, 0x06,                                             // Usage (Keyboard)
     0xa1, 0x01,                                             // Collection (Application)
-    0x85, ReportHidKeyboardReportId::N,                     //  Report ID (5)
+    0x85, ReportHidKeyboardReportId::N,                     //  Report ID (2)
     0x05, 0x07,                                             //  Usage Page (Keyboard)
     0x19, REPORT_HID_KB_USAGE_MIN as u8,                    //  Usage Minimum (REPORT_HID_USAGE_MIN)
     0x29, REPORT_HID_KB_USAGE_MAX as u8,                    //  Usage Maximum (REPORT_HID_USAGE_MAX)
@@ -183,7 +181,7 @@ const REPORT_HID_KEYBOARD_DESCRIPTOR: [u8; 76] =[
 
 #[derive(IntoBytes, Immutable)]
 #[repr(packed)]
-pub struct ReportHidKeyboardInReport {
+struct ReportHidKeyboardInReport {
     report_id: ReportHidKeyboardReportId,
     keys: ReportHidKeyboardUsageBitArray,
 }
@@ -203,7 +201,7 @@ impl ReportHidKeyboardInReport {
 
 #[derive(IntoBytes, Immutable)]
 #[repr(C, packed(2))]
-pub struct ReportHidConsumerControlInReport {
+struct ReportHidConsumerControlInReport {
     report_id: ReportHidConsumerControlReportId,
     _pad1: ConstU8<0>, // Explicit padding to keep the buttons aligned to 2 bytes. Included in the report descriptor.
     pressed_buttons: [u16; 31]
@@ -216,8 +214,11 @@ impl ReportHidConsumerControlInReport {
 }
 
 bitflags! {
+    /**
+     * The definition of the keyboard leds according to the Keyboard HID boot specification.
+     */
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub struct Leds: u8 {
+    pub struct BootLeds: u8 {
         const NUM_LOCK    = 0b00000001;
         const CAPS_LOCK   = 0b00000010;
         const SCROLL_LOCK = 0b00000100;
@@ -252,12 +253,15 @@ impl<R> MutableReport<R> {
     }
 }
 
+/**
+ * A HID Keyboard that uses the Report protocol for communicating with the host.
+ */
 pub struct ReportHidKeyboard<'a, B: UsbBus> {
     usb_dev: UsbDevice<'a, B>,
     ep: HIDClass<'a, B>,
     kb: MutableReport<ReportHidKeyboardInReport>,
     cc: MutableReport<ReportHidConsumerControlInReport>,
-    leds: Leds,
+    leds: BootLeds,
 }
 
 impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
@@ -286,37 +290,37 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
             ep,
             kb: MutableReport::new(ReportHidKeyboardInReport::new()),
             cc: MutableReport::new(ReportHidConsumerControlInReport::new()),
-            leds: Leds::empty(),
+            leds: BootLeds::empty(),
         }
     }
 
     fn ensure_keyboard_usage_within_bounds(
         key: KeyboardUsage,
-    ) -> Result<(), KeyboardKeyChangeError> {
+    ) -> Option<()> {
         if (key as u8) < (REPORT_HID_KB_USAGE_MIN as u8)
             || (key as u8) > (REPORT_HID_KB_USAGE_MAX as u8)
         {
-            Err(KeyboardKeyChangeError::Unsupported)
+            None
         } else {
-            Ok(())
+            Some(())
         }
     }
 
     fn ensure_cc_within_bounds(
-        cc_btn: u16,
-    ) -> Result<(), KeyboardKeyChangeError> {
-        if cc_btn < (REPORT_HID_CC_USAGE_MIN as u16)
-            || cc_btn > (REPORT_HID_CC_USAGE_MAX as u16)
+        cc_btn: Consumer,
+    ) -> Option<()> {
+        if (cc_btn as u16) < (REPORT_HID_CC_USAGE_MIN as u16)
+            || (cc_btn as u16) > (REPORT_HID_CC_USAGE_MAX as u16)
         {
-            Err(KeyboardKeyChangeError::Unsupported)
+            None
         } else {
-            Ok(())
+            Some(())
         }
     }
 
     fn do_rx(&mut self) -> Result<bool, KeyboardPollError> {
         if self.usb_dev.poll(&mut [&mut self.ep]) {
-            let mut buf: [u8; 64] = [0u8; 64];
+            let mut buf: [u8; USB_HID_READ_LEN] = [0u8; USB_HID_READ_LEN];
             let report_info = match self.ep.pull_raw_report(&mut buf) {
                 Ok(r) => r,
                 Err(UsbError::WouldBlock) => return Ok(false),
@@ -325,11 +329,10 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
                 }
             };
 
-            dev_info!(
-                "Received report: {:?} {}",
-                report_info.report_type,
-                report_info.report_id
+            dev_debug!(
+                "Received OUT report with ID: {}", report_info.report_id
             );
+            dev_trace!("OUT report dump: {:x?}", buf);
 
             match report_info.report_id {
                 ReportHidKeyboardReportId::N => {
@@ -338,8 +341,8 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
                         dev_error!("Received not enough bytes for OUT Report");
                         return Err(KeyboardPollError::MalformedOutReport)
                     }
-                    let leds = Leds::from_bits_retain(buf[1]);
-                    dev_info!("LEDs: {:?} ({:b})", leds, buf[1]);
+                    self.leds = BootLeds::from_bits_retain(buf[1]);
+                    dev_debug!("Turned on LEDs: {:?}", self.leds);
                 }
                 report_id => {
                     return Err(KeyboardPollError::UnknownReport(report_id));
@@ -353,7 +356,6 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
 
     fn do_tx_report<R: IntoBytes + Immutable>(ep: &mut HIDClass<'a, B>, report: &mut MutableReport<R>) -> Result<(), KeyboardPollError> {
         if report.is_dirty() {
-            dev_info!("Send report: {:x?}", &report.report.as_bytes());
             match ep.push_raw_input(&report.report.as_bytes()) {
                 Ok(_) => {
                     report.clear_dirty();
@@ -369,15 +371,10 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
 }
 
 impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
-    #[inline]
-    fn press_key(&mut self, key: KeyboardUsage) -> Result<(), KeyboardKeyChangeError> {
-        Self::ensure_keyboard_usage_within_bounds(key)?;
-        dev_info!(
-            "Pressing key: {} ({}) ({})",
-            key as usize,
-            REPORT_HID_KB_USAGE_MIN as usize,
-            key as usize - REPORT_HID_KB_USAGE_MIN as usize
-        );
+    fn press_key(&mut self, key: KeyboardUsage) -> Result<(), HidKeyboardPressError> {
+        Self::ensure_keyboard_usage_within_bounds(key)
+            .ok_or(HidKeyboardPressError::Unsupported)?;
+
         if self
             .kb
             .report
@@ -387,13 +384,14 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
             self.kb.set_dirty();
             Ok(())
         } else {
-            Err(KeyboardKeyChangeError::InvalidState)
+            Err(HidKeyboardPressError::AlreadyPressed)
         }
     }
 
-    #[inline]
-    fn release_key(&mut self, key: KeyboardUsage) -> Result<(), KeyboardKeyChangeError> {
-        Self::ensure_keyboard_usage_within_bounds(key)?;
+    fn release_key(&mut self, key: KeyboardUsage) -> Result<(), HidKeyboardReleaseError> {
+        Self::ensure_keyboard_usage_within_bounds(key)
+            .ok_or(HidKeyboardReleaseError::Unsupported)?;
+
         if self
             .kb
             .report
@@ -403,38 +401,35 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
             self.kb.set_dirty();
             Ok(())
         } else {
-            Err(KeyboardKeyChangeError::InvalidState)
+            Err(HidKeyboardReleaseError::NotPressed)
         }
     }
 
-    fn press_consumer_control_key(&mut self, key: u16) -> Result<(), KeyboardKeyChangeError> {
-        dev_info!("Press: {:x}", key);
-        Self::ensure_cc_within_bounds(key)?;
-        dev_info!("Press2: {:x}", key);
-        match lookup_or_find_empty_mut(&mut self.cc.report.pressed_buttons, &key, &0) {
+    fn press_consumer_control_key(&mut self, key: Consumer) -> Result<(), HidKeyboardPressError> {
+        Self::ensure_cc_within_bounds(key).ok_or(HidKeyboardPressError::Unsupported)?;
+
+        match lookup_or_find_empty_mut(&mut self.cc.report.pressed_buttons, &(key as u16), &0) {
             LookOrFindEmptyMutResult::Found(_) => {
                 // Already pressed
-                dev_info!("Already pressed: {:x}", key);
-                Err(KeyboardKeyChangeError::InvalidState)
+                Err(HidKeyboardPressError::AlreadyPressed)
             },
             LookOrFindEmptyMutResult::Empty(empty) => {
                 // Not pressed, but an empty space found
-                dev_info!("Saved: {:x}", key);
-                *empty = key;
+                *empty = key as u16;
                 self.cc.set_dirty();
                 Ok(())
             },
             LookOrFindEmptyMutResult::Full => {
-                // Kaboom
-                dev_info!("Full: {:x}", key);
-                Err(KeyboardKeyChangeError::Rollover)
+                // Rollover
+                Err(HidKeyboardPressError::Rollover)
             },
         }
     }
 
-    fn release_consumer_control_key(&mut self, key: u16) -> Result<(), KeyboardKeyChangeError> {
-        Self::ensure_cc_within_bounds(key)?;
-        match lookup_or_find_empty_mut(&mut self.cc.report.pressed_buttons, &key, &0) {
+    fn release_consumer_control_key(&mut self, key: Consumer) -> Result<(), HidKeyboardReleaseError> {
+        Self::ensure_cc_within_bounds(key).ok_or(HidKeyboardReleaseError::Unsupported)?;
+
+        match lookup_or_find_empty_mut(&mut self.cc.report.pressed_buttons, &(key as u16), &0) {
             LookOrFindEmptyMutResult::Found(pressed) => {
                 // Pressed, need to unpress
                 *pressed = 0;
@@ -443,7 +438,7 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
             },
             LookOrFindEmptyMutResult::Empty(_) | LookOrFindEmptyMutResult::Full => {
                 // Wasn't pressed
-                Err(KeyboardKeyChangeError::InvalidState)
+                Err(HidKeyboardReleaseError::NotPressed)
             },
         }
     }
@@ -453,9 +448,13 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
         Self::do_tx_report(&mut self.ep, &mut self.cc)?;
         self.do_rx()
     }
+
+    fn leds(&self) -> &BootLeds {
+        &self.leds
+    }
 }
 
-// TODO Not yet implemented
-struct BootHidKeyboard {}
-
+/**
+ * A keyboard that supports both the Report and the Boot keyboard HID protocol, switching between them at host's request. Not yet implemented.
+ */
 struct ReportBootHidKeyboard {}

@@ -397,6 +397,7 @@ dependencies = [
  "dxkb-peripheral",
  "dxkb-split-link",
  "heapless",
+ "hut",
  "itm_logger",
  "log",
  "panic-itm",
@@ -424,6 +425,7 @@ dependencies = [
  "dxkb-proc-macros",
  "dxkb-split-link",
  "heapless",
+ "hut",
  "itm_logger",
  "log",
  "panic-itm",
@@ -746,6 +748,11 @@ name = "humantime"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
+
+[[package]]
+name = "hut"
+version = "0.4.0"
+source = "git+https://github.com/devcexx/hut#d63b1c1cd46c6890e031571a0d49c9af3d755bbd"
 
 [[package]]
 name = "iana-time-zone"
