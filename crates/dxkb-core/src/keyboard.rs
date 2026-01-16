@@ -111,7 +111,7 @@ pub trait SplitKeyboardLike<State> {
     type Hid: HidKeyboard;
 
     fn state_mut(&mut self) -> &mut State;
-    fn hid_report_mut(&mut self) -> &mut Self::Hid;
+    fn hid_mut(&mut self) -> &mut Self::Hid;
 }
 
 pub struct SplitKeyboard<
@@ -489,7 +489,7 @@ where
         &mut self.state
     }
 
-    fn hid_report_mut(&mut self) -> &mut Hid {
+    fn hid_mut(&mut self) -> &mut Hid {
         &mut self.hid
     }
 }

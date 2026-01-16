@@ -7,13 +7,14 @@ use crate::{
     keyboard::{HandleKey, KeyboardStateLike, SplitKeyboardLike},
 };
 
-macro_rules! do_on_state {
+#[macro_export]
+macro_rules! do_on_key_state {
     ($st:ident, $on_pressed:tt, $on_released:tt) => {
         match $st {
-            KeyState::Released => {
+            ::dxkb_common::KeyState::Released => {
                 $on_released;
             }
-            KeyState::Pressed => {
+            ::dxkb_common::KeyState::Pressed => {
                 $on_pressed;
             }
         }
@@ -25,8 +26,8 @@ pub fn standard_key_handle<S, Kb: SplitKeyboardLike<S>>(
     key: KeyboardUsage,
     key_state: KeyState,
 ) {
-    do_on_state!(key_state, { kb.hid_report_mut().press_key(key) }, {
-        kb.hid_report_mut().release_key(key)
+    do_on_key_state!(key_state, { kb.hid_mut().press_key(key) }, {
+        kb.hid_mut().release_key(key)
     });
 }
 
@@ -35,10 +36,10 @@ pub fn consumer_control_key_handle<S, Kb: SplitKeyboardLike<S>>(
     key: Consumer,
     key_state: KeyState,
 ) {
-    do_on_state!(
+    do_on_key_state!(
         key_state,
-        { kb.hid_report_mut().press_consumer_control_key(key) },
-        { kb.hid_report_mut().release_consumer_control_key(key) }
+        { kb.hid_mut().press_consumer_control_key(key) },
+        { kb.hid_mut().release_consumer_control_key(key) }
     );
 }
 
@@ -49,7 +50,7 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
 ) {
     match key {
         BuiltinFunctionKey::PushNextLayer => {
-            do_on_state!(
+            do_on_key_state!(
                 key_state,
                 {
                     if !kb.state_mut().push_next_layer() {
@@ -60,7 +61,7 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::PushLayer(new) => {
-            do_on_state!(
+            do_on_key_state!(
                 key_state,
                 {
                     if !kb.state_mut().push_layer_raw(*new) {
@@ -71,7 +72,7 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::PopLayer => {
-            do_on_state!(
+            do_on_key_state!(
                 key_state,
                 {
                     if kb.state_mut().pop_layer_raw().is_some() {
@@ -82,7 +83,7 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::PushNextLayerTransient => {
-            do_on_state!(
+            do_on_key_state!(
                 key_state,
                 {
                     if !kb.state_mut().push_next_layer() {
@@ -95,7 +96,7 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::PushLayerTransient(new) => {
-            do_on_state!(
+            do_on_key_state!(
                 key_state,
                 {
                     if !kb.state_mut().push_layer_raw(*new) {
@@ -119,6 +120,13 @@ pub enum BuiltinFunctionKey {
     PushLayerTransient(u8),
 }
 
+// TODO after the inclusion of the consumer control keys, the size of this enum
+// has increased to 4 bytes, which is probably too much. The definition of the
+// keys for a standard 104 keys keyboard will reach 416 bytes. It doesn't seem
+// possible to make the rust enum optimization work for such amount of nested
+// enums, without changing the layout of the underlying enums, so alternatives
+// should be considered (e. g collapsing all the nested enums into the same one
+// and manually using the not used variants, etc).
 #[derive(Clone)]
 pub enum DefaultKey {
     NoOp,
@@ -271,21 +279,21 @@ macro_rules! hid_key_from_alias {
 #[macro_export]
 macro_rules! function_key_from_alias {
     (PshNxtLyr) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushNextLayer)
+        $crate::keys::BuiltinFunctionKey::PushNextLayer
     };
     (PshLyr($layer:literal)) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushLayer($layer))
+        $crate::keys::BuiltinFunctionKey::PushLayer($layer)
     };
     (PopLyr) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PopLayer)
+        $crate::keys::BuiltinFunctionKey::PopLayer
     };
     (PshNxtLyrT) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushNextLayerTransient)
+        $crate::keys::BuiltinFunctionKey::PushNextLayerTransient
     };
     (PshLyrT($layer:literal)) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushLayerTransient(
+        $crate::keys::BuiltinFunctionKey::PushLayerTransient(
             $layer,
-        ))
+        )
     };
 }
 
@@ -336,14 +344,14 @@ macro_rules! default_key_from_alias {
     };
 
     (f:$($f:tt)*) => {
-        $crate::function_key_from_alias!($($f)*)
+        $crate::keys::DefaultKey::Function($crate::function_key_from_alias!($($f)*))
     };
 
     (c:$($cc:tt)*) => {
         $crate::keys::DefaultKey::ConsumerControl($crate::consumer_control_usage_from_alias!($($cc)*))
     };
 
-    ($other:tt) => {
-        $crate::keys::DefaultKey::Standard($crate::hid_key_from_alias!($other))
+    ($($other:tt)*) => {
+        $crate::keys::DefaultKey::Standard($crate::hid_key_from_alias!($($other)*))
     };
 }

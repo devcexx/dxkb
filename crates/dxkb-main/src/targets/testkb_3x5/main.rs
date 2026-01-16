@@ -16,15 +16,18 @@
 #![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
 
+mod keys;
+
 use core::any::type_name;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
+use dxkb_core::hid::HidKeyboard;
 
 use dxkb_common::bus::NullBus;
 use dxkb_common::dev_info;
 use dxkb_core::hid::{BasicKeyboardSettings, ReportHidKeyboard};
 use dxkb_core::keyboard::{
-    SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig,
+    KeyboardUsage, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLike, SplitKeyboardLinkMessage, SplitLayoutConfig
 };
 use dxkb_core::keys::DefaultKey;
 use dxkb_main::{CurrentSide, MasterCheckType, make_usb_master_checker};
@@ -33,6 +36,7 @@ use dxkb_peripheral::key_matrix::{
     DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, PinsWithSamePort, RowScan,
 };
 
+use keys::{CustomKey, CustomKeyContext};
 #[allow(unused_imports)]
 use panic_itm as _;
 
@@ -115,7 +119,7 @@ type SplitBusUart = UartDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaS
 type SplitBusT = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUart, DWTClock, 32>;
 
 type LayoutT =
-    SplitKeyboardLayout<KeyboardLayoutConfig, DefaultKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
+    SplitKeyboardLayout<KeyboardLayoutConfig, CustomKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
 type KeyboardT<Hid> = SplitKeyboard<
     LAYERS,
     LAYOUT_ROWS,
@@ -125,11 +129,11 @@ type KeyboardT<Hid> = SplitKeyboard<
     CurrentSide,
     Hid,
     KeyboardLayoutConfig,
-    DefaultKey,
+    CustomKey,
     KeyMatrixT,
     MasterCheckType<UsbBusSensePin>,
     SplitBusT,
-    (),
+    CustomKeyContext,
 >;
 
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
@@ -190,16 +194,17 @@ fn init_key_matrix(rows: KeyMatrixRowPins, cols: KeyMatrixColPins, clocks: &Cloc
 
 #[rustfmt::skip]
 fn build_keyboard_layout() -> LayoutT {
+
     LayoutT::new(
         dxkb_proc_macros::layers!(
-            alias_resolver: dxkb_core::default_key_from_alias,
+            alias_resolver: custom_key_from_alias,
             layers: [
                 {
                     name: "base",
                     rows: [
-                        ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+                        [c:VolDown, c:VolUp, 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
                         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
-                        ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', f:PshLyr(1)],
+                        [u:Plus, 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', f:PshLyr(1)],
                     ]
                 }
             ]
@@ -296,10 +301,27 @@ fn main0() -> ! {
         NVIC::unmask(Interrupt::USART1);
     }
 
+    let mut key_context = CustomKeyContext::new();
     loop {
-        unsafe {
-            KEYBOARD.assume_init_mut().poll(&mut ());
+        let kb =
+            unsafe {
+                KEYBOARD.assume_init_mut()
+            };
+
+        if !kb.hid_mut().dirty() {
+            // Apparently, for pressing a combination of a modifier key plus a
+            // key, we need to do it in phases. First, we need to send an IN
+            // report with the press of the modifier key and then, in another
+            // one, the press of the key needs to happen (while keeping the
+            // modifier pressed.). Otherwise it won't be catched by Linux at least.
+            // For releasing, nothing special is needed apparently.
+            if key_context.plus_pending_press {
+                kb.hid_mut().press_key(KeyboardUsage::KeyboardEqualPlus);
+                key_context.plus_pending_press = false;
+            }
         }
+
+        kb.poll(&mut key_context);
     }
 }
 

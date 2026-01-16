@@ -45,12 +45,14 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum HidKeyboardPressError {
     Unsupported,
     AlreadyPressed,
     Rollover,
 }
 
+#[derive(Debug, Clone)]
 pub enum HidKeyboardReleaseError {
     Unsupported,
     NotPressed,
@@ -97,6 +99,7 @@ pub trait HidKeyboard {
      */
     fn poll(&mut self) -> Result<bool, KeyboardPollError>;
     fn leds(&self) -> &BootLeds;
+    fn dirty(&self) -> bool;
 }
 
 // The linux kernel recognizes ~ 624 consumer control keys. (ref:
@@ -106,8 +109,6 @@ pub trait HidKeyboard {
 // extending the min/max values to comprend the whole CC specification.
 const REPORT_HID_CC_USAGE_MIN: Consumer = Consumer::ConsumerControl;
 const REPORT_HID_CC_USAGE_MAX: Consumer = Consumer::ContactMisc;
-const REPORT_HID_CC_USAGE_COUNT: usize =
-    (REPORT_HID_CC_USAGE_MAX as usize) - (REPORT_HID_CC_USAGE_MIN as usize) + 1;
 
 const REPORT_HID_KB_USAGE_MIN: KeyboardUsage = KeyboardUsage::KeyboardErrorRollOver;
 const REPORT_HID_KB_USAGE_MAX: KeyboardUsage = KeyboardUsage::Reserved;
@@ -460,6 +461,10 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
 
     fn leds(&self) -> &BootLeds {
         &self.leds
+    }
+
+    fn dirty(&self) -> bool {
+        self.kb.is_dirty() || self.cc.is_dirty()
     }
 }
 
