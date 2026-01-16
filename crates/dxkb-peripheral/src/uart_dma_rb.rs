@@ -7,8 +7,7 @@ use core::fmt::Debug;
 use core::mem;
 use cortex_m::interrupt::Mutex;
 use dxkb_common::{
-    bus::{BusPollError, BusRead, BusTransferError, BusWrite},
-    dev_info, dev_warn,
+    bus::{BusPollError, BusRead, BusTransferError, BusWrite}, dev_debug, dev_info, dev_warn
 };
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use stm32f4xx_hal::Ptr;
@@ -210,10 +209,10 @@ impl<const BUF_LEN: usize, const MAX_FRAME_COUNT: usize> DmaRingBuffer<BUF_LEN, 
 
             match section.kind {
                 RbSectionKind::Discarded => {
-                    dev_info!("Polled discard frame: {}", section.len);
+                    dev_debug!("Polled discard frame: {}", section.len);
                 }
                 RbSectionKind::Frame => {
-                    dev_info!("Polled frame: {}", section.len);
+                    dev_debug!("Polled frame: {}", section.len);
                     self.copy_next_read_buffer_bytes(read_off, &mut buf[0..section.len as usize]);
                     return Ok(section.len);
                 }

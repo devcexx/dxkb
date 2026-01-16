@@ -43,6 +43,7 @@ use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::{Input, Output, Pin, PushPull};
 use stm32f4xx_hal::pac::{DMA2, Interrupt, USART1};
 use stm32f4xx_hal::rcc::Clocks;
+use stm32f4xx_hal::signature::Uid;
 use stm32f4xx_hal::{
     dma::StreamsTuple,
     interrupt,
@@ -110,8 +111,7 @@ type SplitBusDmaPeripheral = DMA2;
 type SplitBusTxDmaStream = Stream7<SplitBusDmaPeripheral>;
 type SplitBusRxDmaStream = Stream5<SplitBusDmaPeripheral>;
 
-type SplitBusUart = NullBus;
-//artDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4, 256, 128>;
+type SplitBusUart = UartDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4, 256, 128>;
 type SplitBusT = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUart, DWTClock, 32>;
 
 type LayoutT =
@@ -143,6 +143,16 @@ impl SplitLayoutConfig for KeyboardLayoutConfig {
     const SPLIT_RIGHT_COL_OFFSET: u8 = 5;
 }
 
+fn get_device_id() -> u128 {
+    let mut uid = [0u8; 16];
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(core::mem::transmute(Uid::get()), uid.as_mut_ptr(), size_of::<Uid>());
+    };
+
+    u128::from_le_bytes(uid)
+}
+
 fn init_split_bus(
     usart: USART1,
     dma: SplitBusDmaPeripheral,
@@ -165,7 +175,7 @@ fn init_split_bus(
         &clocks,
     );
 
-    SplitBus::new(NullBus, clock)
+    SplitBus::new(uart_dma, clock, get_device_id())
 }
 
 fn init_key_matrix(rows: KeyMatrixRowPins, cols: KeyMatrixColPins, clocks: &Clocks) -> KeyMatrixT {
@@ -296,10 +306,10 @@ fn main0() -> ! {
 #[interrupt]
 fn USART1() {
     unsafe {
-        // KEYBOARD
-        //     .assume_init_ref()
-        //     .split_bus
-        //     .bus()
-        //     .handle_usart_intr();
+        KEYBOARD
+            .assume_init_ref()
+            .split_bus
+            .bus()
+            .handle_usart_intr();
     }
 }

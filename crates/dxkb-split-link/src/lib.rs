@@ -50,7 +50,7 @@ use core::time::Duration;
 use crc::Table;
 use dxkb_common::bus::{BusPollError, BusRead, BusTransferError, BusWrite};
 use dxkb_common::time::Clock;
-use dxkb_common::{dev_debug, dev_info, dev_trace, dev_warn};
+use dxkb_common::{dev_debug, dev_error, dev_info, dev_trace, dev_warn};
 use heapless::Vec;
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
 use serde::de::DeserializeOwned;
@@ -126,10 +126,24 @@ pub struct FrameContentEnvelope<M> {
 #[derive(Serialize, Deserialize, Debug)]
 #[repr(C)]
 pub enum FrameContent<M> {
-    LinkProbe,
+    // Device ID in probes / sync packets is used to prevent the current peer to
+    // create a connection with itself, when there's something wrong going
+    // on in the underlying bus and the TX is being forwarded to the bus RX.
+    // I've seen this happening when connecting two MCUs together, but one
+    // was still powered off while the one already initiated the split link
+    // connection. Therefore, when received a sync with the same device ID,
+    // that packet is ignored and the connection attempt is cancelled.
+    //
+    // Using a byte array instead of an u128, because ssmarshal/serde
+    // doesn't support serializing u128 values.
+    LinkProbe {
+        device_id: [u8; 16]
+    },
     Ack,
     SyncAck,
-    Sync,
+    Sync {
+        device_id: [u8; 16]
+    },
     TransportMessage(M),
 }
 
@@ -231,6 +245,11 @@ pub struct SplitBus<
     last_recv_frame_time: CS::TInstant,
     last_sent_frame_time: CS::TInstant,
 
+    /// The current unique device ID. This device must be unique between the two
+    /// peers that will establish a connection (or at least, unique enough so
+    /// that they don't clash by chance).
+    device_id: u128,
+
     /// If not empty, indicates that we haven't received yet an ACK
     /// from the peer indicating that it has received the user message
     /// stored in the head of the `user_tx_queue`. The time value
@@ -284,7 +303,7 @@ where
     [(); MaxFrameLength::<Msg>::MAX_FRAME_LENGTH]:,
     [(); MaxFrameLength::<NoMsg>::MAX_FRAME_LENGTH]:,
 {
-    pub fn new(bus: B, clock: CS) -> Self {
+    pub fn new(bus: B, clock: CS, device_id: u128) -> Self {
         let cur = clock.current_instant();
 
         Self {
@@ -299,6 +318,7 @@ where
             rx_seq: 0,
             control_tx_queue: ConstGenericRingBuffer::new(),
             user_tx_queue: ConstGenericRingBuffer::new(),
+            device_id,
             _msg: PhantomData,
             _timings: PhantomData,
         }
@@ -392,6 +412,14 @@ where
         self.control_tx_queue.push(frame);
     }
 
+    fn read_device_id(buf: [u8; 16]) -> u128 {
+        u128::from_be_bytes(buf)
+    }
+
+    fn write_device_id(id: u128) -> [u8; 16] {
+        u128::to_be_bytes(id)
+    }
+
     /// Mutates the current state of the link based on a received
     /// frame. Returns a value that indicates whether it should
     /// continue polling, depending on the function provided by the
@@ -405,14 +433,17 @@ where
         recvf: &mut F,
     ) -> bool {
         match frame.envelope.content {
-            FrameContent::LinkProbe => {
+            FrameContent::LinkProbe { device_id: device_id_bytes } => {
                 // There's nothing to do with this frame, unless the
                 // link is down. If that case, receiving this frame
                 // triggers a link sync.
-                if self.link_status == LinkStatus::Down {
+                let peer_device_id = Self::read_device_id(device_id_bytes);
+                if self.device_id == peer_device_id {
+                    dev_warn!("Ignoring link probe coming from same Device ID: 0x{:x}", peer_device_id);
+                } else if self.link_status == LinkStatus::Down {
                     dev_debug!("Received bus probe. Starting link synchronization");
                     self.change_link_state(LinkStatus::Sync);
-                    self.push_control_frame(FrameContentEnvelope::new(0, FrameContent::Sync));
+                    self.push_control_frame(FrameContentEnvelope::new(0, FrameContent::Sync { device_id: Self::write_device_id(self.device_id) }));
                 }
             }
 
@@ -462,7 +493,7 @@ where
                     dev_debug!("Received unsolicitated SyncACK. Ignoring.");
                 }
             }
-            FrameContent::Sync => {
+            FrameContent::Sync { device_id: device_id_bytes } => {
                 // A sync can happen on any of the different link states:
                 //
                 // - Down: We were anyway wainting for a sync, and the
@@ -482,9 +513,17 @@ where
                 // receiving this? I mean, seq numbers are resetted,
                 // any Ack or that was pending before to be sent
                 // is anyway useless.
-                self.change_link_state(LinkStatus::Up);
-                self.reset_sequence_numbers();
-                self.push_control_frame(FrameContentEnvelope::new(0, FrameContent::SyncAck));
+                let peer_device_id = Self::read_device_id(device_id_bytes);
+                if peer_device_id == self.device_id {
+                    dev_error!("Peer sent our same device ID while trying to sync the channel. Crosstalk between the bus lines? Link establishment aborted");
+                    self.change_link_state(LinkStatus::Down);
+                } else {
+                    dev_info!("Established connection with peer: 0x{:x}", peer_device_id);
+                    self.change_link_state(LinkStatus::Up);
+                    self.reset_sequence_numbers();
+                    self.push_control_frame(FrameContentEnvelope::new(0, FrameContent::SyncAck));
+                }
+
             }
             FrameContent::TransportMessage(ref msg) => {
                 if self.link_status == LinkStatus::Up {
@@ -652,7 +691,7 @@ where
             // TODO We need to do something about probes:
             // - If we stop sending probes when we receive normal frames, we need to trigger link sync everytime we receive a valid frame.
             // - Either that, or we keep sending link probes indefinitely. I prefer the first option just to save some bandwidth
-            self.push_control_frame(FrameContentEnvelope::new(0, FrameContent::LinkProbe));
+            self.push_control_frame(FrameContentEnvelope::new(0, FrameContent::LinkProbe { device_id: Self::write_device_id(self.device_id) }));
         }
 
         if self.link_status == LinkStatus::Sync

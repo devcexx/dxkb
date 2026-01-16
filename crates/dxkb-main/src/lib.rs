@@ -8,7 +8,7 @@
 
 use core::marker::PhantomData;
 
-use dxkb_core::keyboard::{Left, PinMasterSense};
+use dxkb_core::keyboard::{Left, PinMasterSense, Right, AlwaysMaster, AlwaysSlave};
 use stm32f4xx_hal::{gpio::PinPull, hal::digital::InputPin};
 
 #[cfg(not(any(feature = "side-right", feature = "side-left")))]
