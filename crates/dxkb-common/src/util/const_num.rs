@@ -14,8 +14,6 @@ macro_rules! const_num_impl {
             const I: Self = $tname(N);
             const N: $ntype = N;
         }
-
-
     };
 }
 

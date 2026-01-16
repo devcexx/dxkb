@@ -1,8 +1,11 @@
-use proc_macro2::{extra::DelimSpan, Delimiter, Group, Literal, Span, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, Span, TokenStream, TokenTree};
 use quote::{ToTokens, TokenStreamExt, quote};
-use std::{rc::Rc};
+use std::rc::Rc;
 use syn::{
-    braced, bracketed, parenthesized, parse::{Parse, ParseStream, Parser}, parse_macro_input, punctuated::Punctuated, spanned::Spanned, token::Bracket, Attribute, Ident, LitInt, LitStr, Pat, Path, Token
+    Ident, LitInt, LitStr, Path, Token, braced, bracketed,
+    parse::{Parse, ParseStream, Parser},
+    punctuated::Punctuated,
+    spanned::Spanned,
 };
 
 struct ResultAcc<T, E> {
@@ -49,7 +52,7 @@ fn dxkb_keyboard_symbol(name: &str) -> TokenStream {
 #[derive(Debug, Clone)]
 enum KeyAction {
     Passthrough(Span),
-    Key(TokenStream)
+    Key(TokenStream),
 }
 
 /// A [`KeyAction`] that has been computed, taking into account any parent
@@ -59,7 +62,7 @@ enum KeyAction {
 /// but leaving it in case I need to add more variants in the future.
 #[derive(Debug, Clone)]
 enum ConcreteKeyAction {
-    Key(TokenStream)
+    Key(TokenStream),
 }
 impl Parse for KeyAction {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
@@ -79,7 +82,7 @@ impl Parse for KeyAction {
                     tt => {
                         read.append(tt.clone());
                         rest = next
-                    },
+                    }
                 }
             }
             Ok((read, rest))
@@ -94,7 +97,7 @@ enum AttrValue {
     Str(LitStr),
     Int(LitInt),
     BracketGroup(Group),
-    Path(Path)
+    Path(Path),
 }
 
 impl AttrValue {
@@ -110,28 +113,28 @@ impl AttrValue {
     fn str_value(&self) -> Option<&LitStr> {
         match self {
             AttrValue::Str(lit_str) => Some(lit_str),
-            _ => None
+            _ => None,
         }
     }
 
     fn int_value(&self) -> Option<&LitInt> {
         match self {
             AttrValue::Int(lit_int) => Some(lit_int),
-            _ => None
+            _ => None,
         }
     }
 
     fn bracket_group_value(&self) -> Option<&Group> {
         match self {
             AttrValue::BracketGroup(grp) => Some(grp),
-            _ => None
+            _ => None,
         }
     }
 
     fn path_value(&self) -> Option<&Path> {
         match self {
             AttrValue::Path(path) => Some(path),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -150,7 +153,7 @@ impl Parse for AttrValue {
             }
         }
         if let Ok(p) = input.parse::<Path>() {
-            return Ok(AttrValue::Path(p))
+            return Ok(AttrValue::Path(p));
         }
 
         Err(syn::Error::new(
@@ -172,31 +175,42 @@ impl Attr {
     }
 
     fn require_value_str(&self) -> syn::Result<&LitStr> {
-        self.value.str_value().ok_or_else(|| syn::Error::new(
-            self.value.span(),
-            format!("Expected string value for attribute {}", self.key_name()),
-        ))
+        self.value.str_value().ok_or_else(|| {
+            syn::Error::new(
+                self.value.span(),
+                format!("Expected string value for attribute {}", self.key_name()),
+            )
+        })
     }
 
     fn require_bracket_group(&self) -> syn::Result<&Group> {
-        self.value.bracket_group_value().ok_or_else(|| syn::Error::new(
-            self.value.span(),
-            format!("Expected array value for attribute {}", self.key_name()),
-        ))
+        self.value.bracket_group_value().ok_or_else(|| {
+            syn::Error::new(
+                self.value.span(),
+                format!("Expected array value for attribute {}", self.key_name()),
+            )
+        })
     }
 
     fn require_value_int(&self) -> syn::Result<&LitInt> {
-        self.value.int_value().ok_or_else(|| syn::Error::new(
-            self.value.span(),
-            format!("Expected int value for attribute {}", self.key_name()),
-        ))
+        self.value.int_value().ok_or_else(|| {
+            syn::Error::new(
+                self.value.span(),
+                format!("Expected int value for attribute {}", self.key_name()),
+            )
+        })
     }
 
     fn require_value_path(&self) -> syn::Result<&Path> {
-        self.value.path_value().ok_or_else(|| syn::Error::new(
-            self.value.span(),
-            format!("Expected a member path value for attribute {}", self.key_name()),
-        ))
+        self.value.path_value().ok_or_else(|| {
+            syn::Error::new(
+                self.value.span(),
+                format!(
+                    "Expected a member path value for attribute {}",
+                    self.key_name()
+                ),
+            )
+        })
     }
 }
 
@@ -216,10 +230,7 @@ struct AttributeSet {
 
 impl AttributeSet {
     fn new(span: Span, attrs: Punctuated<Attr, Token![,]>) -> Self {
-        Self {
-            span,
-            attrs
-        }
+        Self { span, attrs }
     }
 
     fn span(&self) -> Span {
@@ -227,14 +238,18 @@ impl AttributeSet {
     }
 
     fn find_attr(&self, attr_name: &str) -> Option<&Attr> {
-        self.attrs.iter().find(|attr| attr.key.to_string().as_str() == attr_name)
+        self.attrs
+            .iter()
+            .find(|attr| attr.key.to_string().as_str() == attr_name)
     }
 
     fn require_attr(&self, attr_name: &str) -> syn::Result<&Attr> {
-        self.find_attr(attr_name).ok_or_else(|| syn::Error::new(
-            self.span(),
-            format!("Required attribute in set not found: {}", attr_name),
-        ))
+        self.find_attr(attr_name).ok_or_else(|| {
+            syn::Error::new(
+                self.span(),
+                format!("Required attribute in set not found: {}", attr_name),
+            )
+        })
     }
 }
 
@@ -300,16 +315,23 @@ impl Parse for LayerDef<KeyAction> {
 
         let content;
         let braces = braced!(content in input);
-        let attrs = AttributeSet::new(braces.span.join(), content.parse_terminated(Attr::parse, Token![,])?);
+        let attrs = AttributeSet::new(
+            braces.span.join(),
+            content.parse_terminated(Attr::parse, Token![,])?,
+        );
 
-        let name_attr = attrs.require_attr(ATTR_NAME).and_then(|a| a.require_value_str())?;
+        let name_attr = attrs
+            .require_attr(ATTR_NAME)
+            .and_then(|a| a.require_value_str())?;
         let parent_attr = if let Some(attr) = attrs.find_attr(ATTR_PARENT) {
             Some(attr.require_value_str()?)
         } else {
             None
         };
 
-        let rows_attr = attrs.require_attr(ATTR_ROWS).and_then(|a| a.require_bracket_group())?;
+        let rows_attr = attrs
+            .require_attr(ATTR_ROWS)
+            .and_then(|a| a.require_bracket_group())?;
 
         Ok(LayerDef {
             span: braces.span.span(),
@@ -350,7 +372,6 @@ impl LayersDef<KeyAction> {
         const ATTR_RESOLVER: &str = "alias_resolver";
         const ATTR_LAYERS: &str = "layers";
 
-
         let attrs = AttributeSet::new(outer_span, Parser::parse2(do_parse_attrs, input)?);
 
         let alias_resolver_attr = if let Some(attr) = attrs.find_attr(ATTR_RESOLVER) {
@@ -359,7 +380,9 @@ impl LayersDef<KeyAction> {
             None
         };
 
-        let layers_attr = attrs.require_attr(ATTR_LAYERS).and_then(|a| a.require_bracket_group())?;
+        let layers_attr = attrs
+            .require_attr(ATTR_LAYERS)
+            .and_then(|a| a.require_bracket_group())?;
 
         Ok(LayersDef {
             resolver: alias_resolver_attr.cloned(),
@@ -681,7 +704,11 @@ fn key_to_tokens(resolver: &Path, key: &ConcreteKeyAction) -> TokenStream {
 
 fn layer_row_into_tokens(resolver: &Path, layer: &LayerRow<ConcreteKeyAction>) -> TokenStream {
     let LayerRow = dxkb_keyboard_symbol("LayerRow");
-    let actions = layer.actions.iter().map(|action| key_to_tokens(resolver, action)).collect::<Vec<_>>();
+    let actions = layer
+        .actions
+        .iter()
+        .map(|action| key_to_tokens(resolver, action))
+        .collect::<Vec<_>>();
     quote! {
         #LayerRow::new([
             #(#actions),*
@@ -691,7 +718,10 @@ fn layer_row_into_tokens(resolver: &Path, layer: &LayerRow<ConcreteKeyAction>) -
 
 fn layer_into_tokens(resolver: &Path, layer: &ResolvedLayerDef<ConcreteKeyAction>) -> TokenStream {
     let LayoutLayer = dxkb_keyboard_symbol("LayoutLayer");
-    let rows = layer.rows.iter().map(|row| layer_row_into_tokens(resolver, row));
+    let rows = layer
+        .rows
+        .iter()
+        .map(|row| layer_row_into_tokens(resolver, row));
     quote! {
         #LayoutLayer::new([
             #(#rows),*
@@ -702,8 +732,14 @@ fn layer_into_tokens(resolver: &Path, layer: &ResolvedLayerDef<ConcreteKeyAction
 impl ResolvedLayersDef<ConcreteKeyAction> {
     #[allow(non_snake_case)]
     fn gen_layers_code(&self) -> proc_macro2::TokenStream {
-        let resolver = self.resolver.clone().unwrap_or_else(|| syn::parse2::<Path>(quote! { dxkb_core::default_key_from_alias }).unwrap());
-        let layers = &self.layers.iter().map(|layer| layer_into_tokens(&resolver, layer)).collect::<Vec<_>>();
+        let resolver = self.resolver.clone().unwrap_or_else(|| {
+            syn::parse2::<Path>(quote! { dxkb_core::default_key_from_alias }).unwrap()
+        });
+        let layers = &self
+            .layers
+            .iter()
+            .map(|layer| layer_into_tokens(&resolver, layer))
+            .collect::<Vec<_>>();
         quote! {
             [
                 #(#layers),*

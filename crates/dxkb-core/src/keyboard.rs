@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
 use dxkb_common::{
-    KeyState, dev_debug, dev_error, dev_info, dev_trace, dev_warn,
+    KeyState, dev_error, dev_info, dev_trace, dev_warn,
     util::{BitMatrix, BitMatrixLayout, BoundedU8, ColBitMatrixLayout, ConstCond, IsTrue},
 };
 use dxkb_peripheral::key_matrix::KeyMatrixLike;
@@ -12,18 +12,7 @@ use stm32f4xx_hal::{
     gpio::{PinPull, Pull},
     hal::digital::InputPin,
 };
-use usb_device::{
-    LangID,
-    bus::{UsbBus, UsbBusAllocator},
-    device::{StringDescriptors, UsbDeviceBuilder, UsbVidPid},
-};
-use usbd_hid::{
-    UsbError,
-    descriptor::{KeyboardReport, SerializedDescriptor},
-    hid_class::{
-        HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig,
-    },
-};
+use usbd_hid::descriptor::KeyboardReport;
 
 // Re-export it to be used for macros without needing to reference the usbd-hid crate.
 pub use usbd_hid::descriptor::KeyboardUsage;

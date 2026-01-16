@@ -2,7 +2,10 @@ use dxkb_common::{KeyState, dev_info, dev_warn};
 use hut::Consumer;
 use usbd_hid::descriptor::KeyboardUsage;
 
-use crate::{hid::HidKeyboard, keyboard::{HandleKey, KeyboardStateLike, SplitKeyboardLike}};
+use crate::{
+    hid::HidKeyboard,
+    keyboard::{HandleKey, KeyboardStateLike, SplitKeyboardLike},
+};
 
 macro_rules! do_on_state {
     ($st:ident, $on_pressed:tt, $on_released:tt) => {
@@ -32,9 +35,11 @@ pub fn consumer_control_key_handle<S, Kb: SplitKeyboardLike<S>>(
     key: Consumer,
     key_state: KeyState,
 ) {
-    do_on_state!(key_state, { kb.hid_report_mut().press_consumer_control_key(key) }, {
-        kb.hid_report_mut().release_consumer_control_key(key)
-    });
+    do_on_state!(
+        key_state,
+        { kb.hid_report_mut().press_consumer_control_key(key) },
+        { kb.hid_report_mut().release_consumer_control_key(key) }
+    );
 }
 
 pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
@@ -119,7 +124,7 @@ pub enum DefaultKey {
     NoOp,
     Standard(KeyboardUsage),
     Function(BuiltinFunctionKey),
-    ConsumerControl(Consumer)
+    ConsumerControl(Consumer),
 }
 
 impl From<KeyboardUsage> for DefaultKey {
@@ -147,7 +152,7 @@ impl HandleKey for DefaultKey {
             }
             DefaultKey::ConsumerControl(key) => {
                 consumer_control_key_handle(kb, *key, key_state);
-            },
+            }
         }
     }
 }
@@ -278,23 +283,45 @@ macro_rules! function_key_from_alias {
         $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushNextLayerTransient)
     };
     (PshLyrT($layer:literal)) => {
-        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushLayerTransient($layer))
+        $crate::keys::DefaultKey::Function($crate::keys::BuiltinFunctionKey::PushLayerTransient(
+            $layer,
+        ))
     };
 }
 
 #[macro_export]
 macro_rules! consumer_control_usage_from_alias {
     // Some basic aliases for common keys
-    (VolUp) => { ::hut::Consumer::VolumeIncrement };
-    (VolDown) => { ::hut::Consumer::VolumeDecrement };
-    (Pwr) => { ::hut::Consumer::Power };
-    (Rst) => { ::hut::Consumer::Restart };
-    (Sleep) => { ::hut::Consumer::Sleep };
-    (BrightUp) => { ::hut::Consumer::DisplayBrightnessIncrement };
-    (BrightDown) => { ::hut::Consumer::DisplayBrightnessDecrement };
-    (PlayPause) => { ::hut::Consumer::PlayPause };
-    (Next) => { ::hut::Consumer::ScanNextTrack };
-    (Prev) => { ::hut::Consumer::ScanPreviousTrack };
+    (VolUp) => {
+        ::hut::Consumer::VolumeIncrement
+    };
+    (VolDown) => {
+        ::hut::Consumer::VolumeDecrement
+    };
+    (Pwr) => {
+        ::hut::Consumer::Power
+    };
+    (Rst) => {
+        ::hut::Consumer::Restart
+    };
+    (Sleep) => {
+        ::hut::Consumer::Sleep
+    };
+    (BrightUp) => {
+        ::hut::Consumer::DisplayBrightnessIncrement
+    };
+    (BrightDown) => {
+        ::hut::Consumer::DisplayBrightnessDecrement
+    };
+    (PlayPause) => {
+        ::hut::Consumer::PlayPause
+    };
+    (Next) => {
+        ::hut::Consumer::ScanNextTrack
+    };
+    (Prev) => {
+        ::hut::Consumer::ScanPreviousTrack
+    };
 
     // Just delegate on the names defined by the HID spec.
     ($id:ident) => {

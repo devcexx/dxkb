@@ -1,8 +1,7 @@
-use core::fmt::{Display, Write};
-
 use bitflags::bitflags;
 use dxkb_common::{
-    dev_debug, dev_error, dev_info, dev_trace, util::{BitArray, ConstU8, ConstU8Like, FromByteArray, FromBytesSized}
+    dev_debug, dev_error, dev_trace,
+    util::{BitArray, ConstU8, ConstU8Like},
 };
 use hut::Consumer;
 use usb_device::{
@@ -11,22 +10,25 @@ use usb_device::{
 };
 use usbd_hid::{
     UsbError,
-    descriptor::{
-        KeyboardReport, KeyboardUsage, MediaKey, SerializedDescriptor, gen_hid_descriptor,
-    },
-    hid_class::{
-        HIDClass, HidClassSettings, HidCountryCode, HidProtocol, HidSubClass, ProtocolModeConfig,
-    },
+    descriptor::KeyboardUsage,
+    hid_class::{HIDClass, HidClassSettings, HidProtocol, HidSubClass},
 };
 use zerocopy::{Immutable, IntoBytes};
 
 enum LookOrFindEmptyMutResult<'a, A> {
     Found(&'a mut A),
     Empty(&'a mut A),
-    Full
+    Full,
 }
 
-fn lookup_or_find_empty_mut<'a, A>(haystick: &'a mut [A], needle: &'a A, empty: &'a A) -> LookOrFindEmptyMutResult<'a, A> where A: Eq {
+fn lookup_or_find_empty_mut<'a, A>(
+    haystick: &'a mut [A],
+    needle: &'a A,
+    empty: &'a A,
+) -> LookOrFindEmptyMutResult<'a, A>
+where
+    A: Eq,
+{
     let mut last_empty_idx: isize = -1;
     for i in 0..haystick.len() {
         if &haystick[i] == needle {
@@ -46,7 +48,7 @@ fn lookup_or_find_empty_mut<'a, A>(haystick: &'a mut [A], needle: &'a A, empty: 
 pub enum HidKeyboardPressError {
     Unsupported,
     AlreadyPressed,
-    Rollover
+    Rollover,
 }
 
 pub enum HidKeyboardReleaseError {
@@ -82,7 +84,10 @@ pub trait HidKeyboard {
     fn release_key(&mut self, key: KeyboardUsage) -> Result<(), HidKeyboardReleaseError>;
 
     fn press_consumer_control_key(&mut self, key: Consumer) -> Result<(), HidKeyboardPressError>;
-    fn release_consumer_control_key(&mut self, key: Consumer) -> Result<(), HidKeyboardReleaseError>;
+    fn release_consumer_control_key(
+        &mut self,
+        key: Consumer,
+    ) -> Result<(), HidKeyboardReleaseError>;
 
     /**
      * Polls changes in the USB device, and transmits changes pending to be
@@ -101,8 +106,8 @@ pub trait HidKeyboard {
 // extending the min/max values to comprend the whole CC specification.
 const REPORT_HID_CC_USAGE_MIN: Consumer = Consumer::ConsumerControl;
 const REPORT_HID_CC_USAGE_MAX: Consumer = Consumer::ContactMisc;
-const REPORT_HID_CC_USAGE_COUNT: usize = (REPORT_HID_CC_USAGE_MAX as usize) - (REPORT_HID_CC_USAGE_MIN as usize) + 1;
-
+const REPORT_HID_CC_USAGE_COUNT: usize =
+    (REPORT_HID_CC_USAGE_MAX as usize) - (REPORT_HID_CC_USAGE_MIN as usize) + 1;
 
 const REPORT_HID_KB_USAGE_MIN: KeyboardUsage = KeyboardUsage::KeyboardErrorRollOver;
 const REPORT_HID_KB_USAGE_MAX: KeyboardUsage = KeyboardUsage::Reserved;
@@ -139,6 +144,7 @@ const fn u16_hibits(n: u16) -> u8 {
 // make the device to SerDe anything. There has to be (or I should make),
 // something in between usbd-hid and just writing the bytes of the descriptor
 // manually.
+#[rustfmt::skip]
 const REPORT_HID_KEYBOARD_DESCRIPTOR: [u8; 76] =[
     0x05, 0x0c,                                             // Usage Page (Consumer Devices)
     0x09, 0x01,                                             // Usage (Consumer Control)
@@ -194,7 +200,7 @@ impl ReportHidKeyboardInReport {
     pub const fn new() -> Self {
         ReportHidKeyboardInReport {
             report_id: ReportHidKeyboardReportId::I,
-            keys: ReportHidKeyboardUsageBitArray::new()
+            keys: ReportHidKeyboardUsageBitArray::new(),
         }
     }
 }
@@ -204,12 +210,16 @@ impl ReportHidKeyboardInReport {
 struct ReportHidConsumerControlInReport {
     report_id: ReportHidConsumerControlReportId,
     _pad1: ConstU8<0>, // Explicit padding to keep the buttons aligned to 2 bytes. Included in the report descriptor.
-    pressed_buttons: [u16; 31]
+    pressed_buttons: [u16; 31],
 }
 
 impl ReportHidConsumerControlInReport {
     pub const fn new() -> Self {
-        Self { report_id: ReportHidConsumerControlReportId::I, _pad1: ConstU8::I, pressed_buttons: [0u16; 31] }
+        Self {
+            report_id: ReportHidConsumerControlReportId::I,
+            _pad1: ConstU8::I,
+            pressed_buttons: [0u16; 31],
+        }
     }
 }
 
@@ -236,7 +246,7 @@ impl<R> MutableReport<R> {
     fn new(report: R) -> MutableReport<R> {
         Self {
             report,
-            dirty: false
+            dirty: false,
         }
     }
 
@@ -294,9 +304,7 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
         }
     }
 
-    fn ensure_keyboard_usage_within_bounds(
-        key: KeyboardUsage,
-    ) -> Option<()> {
+    fn ensure_keyboard_usage_within_bounds(key: KeyboardUsage) -> Option<()> {
         if (key as u8) < (REPORT_HID_KB_USAGE_MIN as u8)
             || (key as u8) > (REPORT_HID_KB_USAGE_MAX as u8)
         {
@@ -306,9 +314,7 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
         }
     }
 
-    fn ensure_cc_within_bounds(
-        cc_btn: Consumer,
-    ) -> Option<()> {
+    fn ensure_cc_within_bounds(cc_btn: Consumer) -> Option<()> {
         if (cc_btn as u16) < (REPORT_HID_CC_USAGE_MIN as u16)
             || (cc_btn as u16) > (REPORT_HID_CC_USAGE_MAX as u16)
         {
@@ -329,9 +335,7 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
                 }
             };
 
-            dev_debug!(
-                "Received OUT report with ID: {}", report_info.report_id
-            );
+            dev_debug!("Received OUT report with ID: {}", report_info.report_id);
             dev_trace!("OUT report dump: {:x?}", buf);
 
             match report_info.report_id {
@@ -339,7 +343,7 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
                     // I'm not gonna even bother to create a struct to read a single byte, at least for now.
                     if report_info.len < 2 {
                         dev_error!("Received not enough bytes for OUT Report");
-                        return Err(KeyboardPollError::MalformedOutReport)
+                        return Err(KeyboardPollError::MalformedOutReport);
                     }
                     self.leds = BootLeds::from_bits_retain(buf[1]);
                     dev_debug!("Turned on LEDs: {:?}", self.leds);
@@ -354,7 +358,10 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
         }
     }
 
-    fn do_tx_report<R: IntoBytes + Immutable>(ep: &mut HIDClass<'a, B>, report: &mut MutableReport<R>) -> Result<(), KeyboardPollError> {
+    fn do_tx_report<R: IntoBytes + Immutable>(
+        ep: &mut HIDClass<'a, B>,
+        report: &mut MutableReport<R>,
+    ) -> Result<(), KeyboardPollError> {
         if report.is_dirty() {
             match ep.push_raw_input(&report.report.as_bytes()) {
                 Ok(_) => {
@@ -372,8 +379,7 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
 
 impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
     fn press_key(&mut self, key: KeyboardUsage) -> Result<(), HidKeyboardPressError> {
-        Self::ensure_keyboard_usage_within_bounds(key)
-            .ok_or(HidKeyboardPressError::Unsupported)?;
+        Self::ensure_keyboard_usage_within_bounds(key).ok_or(HidKeyboardPressError::Unsupported)?;
 
         if self
             .kb
@@ -412,21 +418,24 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
             LookOrFindEmptyMutResult::Found(_) => {
                 // Already pressed
                 Err(HidKeyboardPressError::AlreadyPressed)
-            },
+            }
             LookOrFindEmptyMutResult::Empty(empty) => {
                 // Not pressed, but an empty space found
                 *empty = key as u16;
                 self.cc.set_dirty();
                 Ok(())
-            },
+            }
             LookOrFindEmptyMutResult::Full => {
                 // Rollover
                 Err(HidKeyboardPressError::Rollover)
-            },
+            }
         }
     }
 
-    fn release_consumer_control_key(&mut self, key: Consumer) -> Result<(), HidKeyboardReleaseError> {
+    fn release_consumer_control_key(
+        &mut self,
+        key: Consumer,
+    ) -> Result<(), HidKeyboardReleaseError> {
         Self::ensure_cc_within_bounds(key).ok_or(HidKeyboardReleaseError::Unsupported)?;
 
         match lookup_or_find_empty_mut(&mut self.cc.report.pressed_buttons, &(key as u16), &0) {
@@ -435,11 +444,11 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
                 *pressed = 0;
                 self.cc.set_dirty();
                 Ok(())
-            },
+            }
             LookOrFindEmptyMutResult::Empty(_) | LookOrFindEmptyMutResult::Full => {
                 // Wasn't pressed
                 Err(HidKeyboardReleaseError::NotPressed)
-            },
+            }
         }
     }
 

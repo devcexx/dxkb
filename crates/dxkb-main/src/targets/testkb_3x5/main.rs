@@ -23,10 +23,10 @@ use core::ptr::addr_of_mut;
 use dxkb_common::bus::NullBus;
 use dxkb_common::dev_info;
 use dxkb_core::hid::{BasicKeyboardSettings, ReportHidKeyboard};
-use dxkb_core::keys::DefaultKey;
 use dxkb_core::keyboard::{
     SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig,
 };
+use dxkb_core::keys::DefaultKey;
 use dxkb_main::{CurrentSide, MasterCheckType, make_usb_master_checker};
 use dxkb_peripheral::clock::DWTClock;
 use dxkb_peripheral::key_matrix::{
@@ -52,9 +52,9 @@ use stm32f4xx_hal::{
     rcc::RccExt,
 };
 use synopsys_usb_otg::UsbBus;
+use usb_device::LangID;
 use usb_device::bus::UsbBusAllocator;
 use usb_device::device::{StringDescriptors, UsbVidPid};
-use usb_device::LangID;
 
 // The total layers of the layout.
 const LAYERS: u8 = 1;
@@ -111,7 +111,7 @@ type SplitBusTxDmaStream = Stream7<SplitBusDmaPeripheral>;
 type SplitBusRxDmaStream = Stream5<SplitBusDmaPeripheral>;
 
 type SplitBusUart = NullBus;
-    //artDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4, 256, 128>;
+//artDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4, 256, 128>;
 type SplitBusT = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUart, DWTClock, 32>;
 
 type LayoutT =
@@ -241,14 +241,17 @@ fn main0() -> ! {
         }))
     };
 
-    let hid = ReportHidKeyboard::alloc(usb_alloc, &BasicKeyboardSettings {
-        vid_pid: UsbVidPid(0x16c0, 0x27db),
-        string_descriptors: &[StringDescriptors::new(LangID::ES)
-            .serial_number("0")
-            .manufacturer("devcexx")
-            .product("dxkb testkb_3x5")],
-        poll_ms: 1,
-    });
+    let hid = ReportHidKeyboard::alloc(
+        usb_alloc,
+        &BasicKeyboardSettings {
+            vid_pid: UsbVidPid(0x16c0, 0x27db),
+            string_descriptors: &[StringDescriptors::new(LangID::ES)
+                .serial_number("0")
+                .manufacturer("devcexx")
+                .product("dxkb testkb_3x5")],
+            poll_ms: 1,
+        },
+    );
 
     let matrix = init_key_matrix(
         (

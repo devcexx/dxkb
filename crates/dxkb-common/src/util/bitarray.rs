@@ -14,14 +14,20 @@ impl<const N: usize> BitArraySize<N> {
 
 #[repr(transparent)]
 #[derive(Clone, FromBytes, IntoBytes, Immutable, Debug)]
-pub struct BitArray<const N: usize> where [(); BitArraySize::<N>::SIZE]: {
-    buf: [u8; BitArraySize::<N>::SIZE]
+pub struct BitArray<const N: usize>
+where
+    [(); BitArraySize::<N>::SIZE]:,
+{
+    buf: [u8; BitArraySize::<N>::SIZE],
 }
 
-impl<const N: usize> BitArray<N> where [(); BitArraySize::<N>::SIZE]: {
+impl<const N: usize> BitArray<N>
+where
+    [(); BitArraySize::<N>::SIZE]:,
+{
     pub const fn new() -> Self {
         Self {
-            buf: [0; BitArraySize::<N>::SIZE]
+            buf: [0; BitArraySize::<N>::SIZE],
         }
     }
 
@@ -35,7 +41,7 @@ impl<const N: usize> BitArray<N> where [(); BitArraySize::<N>::SIZE]: {
         let value = unsafe { self.buf.get_unchecked_mut(index / 8) };
         let copy = *value;
         *value |= 1 << (index % 8);
-        return copy != *value
+        return copy != *value;
     }
 
     pub unsafe fn toggle_unchecked(&mut self, index: usize) {
@@ -49,7 +55,7 @@ impl<const N: usize> BitArray<N> where [(); BitArraySize::<N>::SIZE]: {
         let value = unsafe { self.buf.get_unchecked_mut(index / 8) };
         let copy = *value;
         *value &= !(1 << (index % 8));
-        return copy != *value
+        return copy != *value;
     }
 
     pub unsafe fn put_unchecked(&mut self, index: usize, value: bool) {
@@ -63,40 +69,53 @@ impl<const N: usize> BitArray<N> where [(); BitArraySize::<N>::SIZE]: {
     }
 
     pub unsafe fn get_unchecked(&self, index: usize) -> bool {
-        unsafe {
-            (*self.buf.get_unchecked(index / 8) & (1 << (index % 8))) != 0
-        }
+        unsafe { (*self.buf.get_unchecked(index / 8) & (1 << (index % 8))) != 0 }
     }
 
-    fn set_infallible<const I: usize>(&mut self) where ConstCond<{I < N}>: IsTrue {
+    fn set_infallible<const I: usize>(&mut self)
+    where
+        ConstCond<{ I < N }>: IsTrue,
+    {
         unsafe {
             // SAFETY: Bounds checked in type assertions
             self.set_unchecked(I);
         }
     }
 
-    fn clear_infallible<const I: usize>(&mut self) where ConstCond<{I < N}>: IsTrue {
+    fn clear_infallible<const I: usize>(&mut self)
+    where
+        ConstCond<{ I < N }>: IsTrue,
+    {
         unsafe {
             // SAFETY: Bounds checked in type assertions
             self.clear_unchecked(I);
         }
     }
 
-    fn toggle_infallible<const I: usize>(&mut self) where ConstCond<{I < N}>: IsTrue {
+    fn toggle_infallible<const I: usize>(&mut self)
+    where
+        ConstCond<{ I < N }>: IsTrue,
+    {
         unsafe {
             // SAFETY: Bounds checked in type assertions
             self.toggle_unchecked(I);
         }
     }
 
-    fn put_infallible<const I: usize>(&mut self, value: bool) where ConstCond<{I < N}>: IsTrue {
+    fn put_infallible<const I: usize>(&mut self, value: bool)
+    where
+        ConstCond<{ I < N }>: IsTrue,
+    {
         unsafe {
             // SAFETY: Bounds checked in type assertions
             self.put_unchecked(I, value);
         }
     }
 
-    fn get_infallible<const I: usize>(&self) -> bool where ConstCond<{I < N}>: IsTrue {
+    fn get_infallible<const I: usize>(&self) -> bool
+    where
+        ConstCond<{ I < N }>: IsTrue,
+    {
         unsafe {
             // SAFETY: Bounds checked in type assertions
             self.get_unchecked(I)
