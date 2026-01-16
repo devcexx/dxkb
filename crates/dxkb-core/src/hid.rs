@@ -149,7 +149,7 @@ const REPORT_HID_KEYBOARD_DESCRIPTOR: [u8; 76] =[
     0x05, 0x0c,                                             // Usage Page (Consumer Devices)
     0x09, 0x01,                                             // Usage (Consumer Control)
     0xa1, 0x01,                                             // Collection (Application)
-    0x85, 0x04,                                             //  Report ID (1)
+    0x85, 0x01,                                             //  Report ID (1)
     0x95, 0x01,                                             //  Report Count (1)
     0x75, 0x08,                                             //  Report Size (8)
     0x81, 0x01,                                             //  Output (Cnst,Arr,Abs) Convenience padding to align the pressed CC keys to 16-bit word.
