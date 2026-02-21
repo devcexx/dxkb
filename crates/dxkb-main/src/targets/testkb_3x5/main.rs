@@ -23,7 +23,7 @@ use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 use dxkb_core::hid::HidKeyboard;
 
-use dxkb_common::bus::NullBus;
+use dxkb_common::bus::{BusPollError, BusTransferError, NullBus};
 use dxkb_common::dev_info;
 use dxkb_core::hid::{BasicKeyboardSettings, ReportHidKeyboard};
 use dxkb_core::keyboard::{
@@ -35,19 +35,23 @@ use dxkb_peripheral::clock::DWTClock;
 use dxkb_peripheral::key_matrix::{
     DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, PinsWithSamePort, RowScan,
 };
-
+use dxkb_common::bus::BusWrite;
+use dxkb_common::bus::BusRead;
 use keys::{CustomKey, CustomKeyContext};
+use log::info;
 #[allow(unused_imports)]
 use panic_itm as _;
 
 use cortex_m_rt::entry;
-use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, UartDmaRb};
+use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, FullDuplex, FullDuplexInitializer, HalfDuplex, HalfDuplexInitializer, UartDmaRb};
 use dxkb_split_link::{SplitBus, TestingTimings};
 use stm32f4xx_hal::dma::{Stream5, Stream7};
+use stm32f4xx_hal::gpio::alt::sys;
 use stm32f4xx_hal::gpio::{Input, Output, Pin, PushPull};
-use stm32f4xx_hal::pac::{DMA2, Interrupt, USART1};
+use stm32f4xx_hal::pac::{Interrupt, DMA2, EXTI, USART1};
 use stm32f4xx_hal::rcc::Clocks;
 use stm32f4xx_hal::signature::Uid;
+use stm32f4xx_hal::syscfg::SysCfg;
 use stm32f4xx_hal::{
     dma::StreamsTuple,
     interrupt,
@@ -115,7 +119,7 @@ type SplitBusDmaPeripheral = DMA2;
 type SplitBusTxDmaStream = Stream7<SplitBusDmaPeripheral>;
 type SplitBusRxDmaStream = Stream5<SplitBusDmaPeripheral>;
 
-type SplitBusUart = UartDmaRb<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4, 256, 128>;
+type SplitBusUart = UartDmaRb<FullDuplex<SplitBusUsart, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4>, 256, 256, 128>;
 type SplitBusT = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUart, DWTClock, 32>;
 
 type LayoutT =
@@ -170,10 +174,11 @@ fn init_split_bus(
 
     let dma = StreamsTuple::new(dma);
     let uart_dma = UartDmaRb::init(
-        usart,
-        (tx, rx),
-        dma.7,
-        dma.5,
+        FullDuplexInitializer::new(usart,
+            (tx, rx),
+            dma.7,
+            dma.5
+        ),
         unsafe { &mut SPLIT_BUS_DMA_TX_BUF },
         unsafe { &mut SPLIT_BUS_DMA_RX_BUF },
         &clocks,
@@ -218,7 +223,7 @@ fn main() -> ! {
 }
 
 fn main0() -> ! {
-    let dp = pac::Peripherals::take().unwrap();
+    let mut dp = pac::Peripherals::take().unwrap();
     let mut cortex = cortex_m::Peripherals::take().unwrap();
 
     let rcc = dp.RCC.constrain();
@@ -284,7 +289,7 @@ fn main0() -> ! {
         &clocks,
     );
 
-    let split_bus = init_split_bus(dp.USART1, dp.DMA2, gpiob.pb6, gpiob.pb7, clock, &clocks);
+    let mut split_bus = init_split_bus(dp.USART1, dp.DMA2, gpiob.pb6, gpiob.pb7, clock, &clocks);
     let master_tester = make_usb_master_checker(gpioa.pa9.into_input());
     unsafe {
         KEYBOARD.write(KeyboardT::new(
@@ -299,6 +304,8 @@ fn main0() -> ! {
     unsafe {
         // Go!
         NVIC::unmask(Interrupt::USART1);
+        NVIC::unmask(Interrupt::DMA2_STREAM7);
+        NVIC::unmask(Interrupt::EXTI9_5);
     }
 
     let mut key_context = CustomKeyContext::new();
@@ -329,9 +336,9 @@ fn main0() -> ! {
 fn USART1() {
     unsafe {
         KEYBOARD
-            .assume_init_ref()
+            .assume_init_mut()
             .split_bus
-            .bus()
+            .bus_mut()
             .handle_usart_intr();
     }
 }

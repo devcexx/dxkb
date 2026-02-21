@@ -4,19 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "dxkb-lily58l-stm32f411"
-path = "src/targets/lily58l/main.rs"
-required-features = ["stm32f411"]
-
-
-[[bin]]
 name = "testkb-3x5-stm32f411"
 path = "src/targets/testkb_3x5/main.rs"
-required-features = ["stm32f411"]
-
-[[bin]]
-name = "testing"
-path = "src/targets/testing/main.rs"
 required-features = ["stm32f411"]
 
 [features]

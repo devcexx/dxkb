@@ -371,6 +371,11 @@ where
         &self.bus
     }
 
+    pub fn bus_mut(&mut self) -> &mut B {
+        &mut self.bus
+    }
+
+
     pub fn link_status(&self) -> LinkStatus {
         self.link_status
     }
