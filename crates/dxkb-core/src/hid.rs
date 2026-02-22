@@ -15,6 +15,8 @@ use usbd_hid::{
 };
 use zerocopy::{Immutable, IntoBytes};
 
+use crate::log::RingBufferLogger;
+
 enum LookOrFindEmptyMutResult<'a, A> {
     Found(&'a mut A),
     Empty(&'a mut A),
@@ -186,6 +188,14 @@ const REPORT_HID_KEYBOARD_DESCRIPTOR: [u8; 76] =[
     0xc0,                                                   // End Collection
 ];
 
+const DEBUG_EP_DESCRIPTOR: [u8; 14] = [
+    0x0b, 0x00, 0x00, 0x00, 0x00,  // USAGE (Generic Desktop:Undefined)
+    0x06, 0x00, 0xff,              // USAGE_PAGE (Vendor Defined Page 1)
+    0x75, 0x08,                    // REPORT_SIZE (8)
+    0x95, 0x40,                    // REPORT_COUNT (64)
+    0x81, 0x02                     // OUTPUT (Data,Var,Abs)
+];
+
 #[derive(IntoBytes, Immutable)]
 #[repr(packed)]
 struct ReportHidKeyboardInReport {
@@ -267,18 +277,25 @@ impl<R> MutableReport<R> {
 /**
  * A HID Keyboard that uses the Report protocol for communicating with the host.
  */
-pub struct ReportHidKeyboard<'a, B: UsbBus> {
+pub struct ReportHidKeyboard<'a, B: UsbBus, const DBG_SIZE: usize> {
     usb_dev: UsbDevice<'a, B>,
     ep: HIDClass<'a, B>,
+    // TODO This shouldn't be here, but right now the ReportHidKeyboard struct
+    // owns the usb polling. This must be kept out of here, I guess.
+    //
+    // TODO Gate behind a feature.
+    debug_ep: HIDClass<'a, B>,
+    logger: &'static RingBufferLogger<DBG_SIZE>,
     kb: MutableReport<ReportHidKeyboardInReport>,
     cc: MutableReport<ReportHidConsumerControlInReport>,
     leds: BootLeds,
 }
 
-impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
+impl<'a, B: UsbBus, const DBG_SIZE: usize> ReportHidKeyboard<'a, B, DBG_SIZE> {
     pub fn alloc<'s>(
         allocator: &'a UsbBusAllocator<B>,
         settings: &'s BasicKeyboardSettings<'s, 'a>,
+        logger: &'static RingBufferLogger<DBG_SIZE>,
     ) -> Self {
         let mut hid_settings = HidClassSettings::default();
         hid_settings.protocol = HidProtocol::Keyboard;
@@ -290,6 +307,14 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
             settings.poll_ms,
             hid_settings,
         );
+
+        let debug_ep = HIDClass::new_ep_in_with_settings(
+            allocator,
+            &DEBUG_EP_DESCRIPTOR,
+            settings.poll_ms,
+            HidClassSettings::default(),
+        );
+
         let usb_dev =
             UsbDeviceBuilder::new(allocator, UsbVidPid(settings.vid_pid.0, settings.vid_pid.1))
                 .strings(settings.string_descriptors)
@@ -299,6 +324,8 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
         Self {
             usb_dev,
             ep,
+            debug_ep,
+            logger,
             kb: MutableReport::new(ReportHidKeyboardInReport::new()),
             cc: MutableReport::new(ReportHidConsumerControlInReport::new()),
             leds: BootLeds::empty(),
@@ -326,7 +353,7 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
     }
 
     fn do_rx(&mut self) -> Result<bool, KeyboardPollError> {
-        if self.usb_dev.poll(&mut [&mut self.ep]) {
+        if self.usb_dev.poll(&mut [&mut self.ep, &mut self.debug_ep]) {
             let mut buf: [u8; USB_HID_READ_LEN] = [0u8; USB_HID_READ_LEN];
             let report_info = match self.ep.pull_raw_report(&mut buf) {
                 Ok(r) => r,
@@ -378,7 +405,7 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
     }
 }
 
-impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
+impl<'a, B: UsbBus, const DBG_SIZE: usize> HidKeyboard for ReportHidKeyboard<'a, B, DBG_SIZE> {
     fn press_key(&mut self, key: KeyboardUsage) -> Result<(), HidKeyboardPressError> {
         Self::ensure_keyboard_usage_within_bounds(key).ok_or(HidKeyboardPressError::Unsupported)?;
 
@@ -456,7 +483,18 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
     fn poll(&mut self) -> Result<bool, KeyboardPollError> {
         Self::do_tx_report(&mut self.ep, &mut self.kb)?;
         Self::do_tx_report(&mut self.ep, &mut self.cc)?;
-        self.do_rx()
+        let r = self.do_rx()?;
+
+        let mut debug_buf: [u8; 64] = [0u8; 64];
+        let count = self.logger.read_pending_bytes(&mut debug_buf);
+        if count > 0 {
+            let r = self.debug_ep.push_raw_input(&debug_buf[0..count]);
+            if let Ok(_) = r {
+                self.logger.drop_pending_bytes(count);
+            }
+        }
+
+        Ok(r)
     }
 
     fn leds(&self) -> &BootLeds {

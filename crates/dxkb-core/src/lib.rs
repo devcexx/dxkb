@@ -7,3 +7,4 @@
 pub mod hid;
 pub mod keyboard;
 pub mod keys;
+pub mod log;

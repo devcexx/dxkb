@@ -21,6 +21,7 @@ mod keys;
 use core::any::type_name;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
+use dxkb_common::util::RingBuffer;
 use dxkb_core::hid::HidKeyboard;
 
 use dxkb_common::bus::{BusPollError, BusTransferError, NullBus};
@@ -30,6 +31,7 @@ use dxkb_core::keyboard::{
     KeyboardUsage, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLike, SplitKeyboardLinkMessage, SplitLayoutConfig
 };
 use dxkb_core::keys::DefaultKey;
+use dxkb_core::log::RingBufferLogger;
 use dxkb_main::{CurrentSide, MasterCheckType, make_usb_master_checker};
 use dxkb_peripheral::clock::DWTClock;
 use dxkb_peripheral::key_matrix::{
@@ -38,13 +40,14 @@ use dxkb_peripheral::key_matrix::{
 use dxkb_common::bus::BusWrite;
 use dxkb_common::bus::BusRead;
 use keys::{CustomKey, CustomKeyContext};
-use log::info;
+use log::{info, Log, Record};
 #[allow(unused_imports)]
 use panic_itm as _;
 
 use cortex_m_rt::entry;
 use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, FullDuplex, FullDuplexInitializer, HalfDuplex, HalfDuplexInitializer, UartDmaRb};
 use dxkb_split_link::{SplitBus, TestingTimings};
+use ringbuffer::ConstGenericRingBuffer;
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::alt::sys;
 use stm32f4xx_hal::gpio::{Input, Output, Pin, PushPull};
@@ -143,8 +146,10 @@ type KeyboardT<Hid> = SplitKeyboard<
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 static mut SPLIT_BUS_DMA_RX_BUF: DmaRingBuffer<256, 128> = DmaRingBuffer::new();
 static mut SPLIT_BUS_DMA_TX_BUF: [u8; 256] = [0u8; 256];
-static mut KEYBOARD: MaybeUninit<KeyboardT<ReportHidKeyboard<UsbBus<USB>>>> = MaybeUninit::uninit();
+static mut KEYBOARD: MaybeUninit<KeyboardT<ReportHidKeyboard<UsbBus<USB>,1024>>> = MaybeUninit::uninit();
 static mut USB_ALLOC: MaybeUninit<UsbBusAllocator<UsbBus<USB>>> = MaybeUninit::uninit();
+
+static mut HID_LOGGER: RingBufferLogger<1024> = RingBufferLogger::new(log::Level::Trace, RingBuffer::new());
 
 struct KeyboardLayoutConfig;
 impl SplitLayoutConfig for KeyboardLayoutConfig {
@@ -241,6 +246,8 @@ fn main0() -> ! {
     let gpiob = dp.GPIOB.split();
 
     itm_logger::init_with_level(log::Level::Trace).unwrap();
+    // RingBufferLogger::install(unsafe { &HID_LOGGER }).unwrap();
+
     dev_info!("Device startup. Device configuration:");
     dev_info!(" - Current Side: {:?}", type_name::<CurrentSide>());
 
@@ -270,6 +277,9 @@ fn main0() -> ! {
                 .manufacturer("devcexx")
                 .product("dxkb testkb_3x5")],
             poll_ms: 1,
+        },
+        unsafe {
+            &HID_LOGGER
         },
     );
 

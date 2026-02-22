@@ -864,6 +864,9 @@ where
     }
 
     fn is_tx_busy(&self) -> bool {
+        // TODO The line should be considered busy after the tx has ended + the
+        // time for the next IDLE signal to be sent, so the peer can detect the
+        // previous frame termination.
         let cts = free_with_muts!(
             cts <- self.cts,
             || {
@@ -876,7 +879,6 @@ where
 
     #[inline(always)]
     fn handle_usart_intr(&mut self, flags: BitFlags<Flag>) {
-        // Nothing to do
         if flags.contains(Flag::Idle) {
             // Set CTS to true when we detect that the line is idle.
             free_with_muts!(
