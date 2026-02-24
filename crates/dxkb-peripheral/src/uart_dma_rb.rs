@@ -2,20 +2,18 @@
 //! handled by a DMA stream that writes the incoming data forever into
 //! a ring buffer.
 
-use core::{cell::UnsafeCell, marker::PhantomData};
+use core::cell::UnsafeCell;
 use core::fmt::Debug;
 use core::mem;
-use cortex_m::interrupt::{free, Mutex};
-use dxkb_common::__log::info;
+use cortex_m::interrupt::Mutex;
+use dxkb_common::dev_trace;
 use dxkb_common::{
-    bus::{BusPollError, BusRead, BusTransferError, BusWrite}, dev_debug, dev_info, dev_warn
+    bus::{BusPollError, BusRead, BusTransferError, BusWrite}, dev_info, dev_warn
 };
 use enumflags2::{BitFlag, BitFlags};
 use ringbuffer::{ConstGenericRingBuffer, RingBuffer};
-use stm32f4xx_hal::gpio::alt::sys;
 use stm32f4xx_hal::gpio::{Edge, ExtiPin};
 use stm32f4xx_hal::pac::EXTI;
-use stm32f4xx_hal::prelude::_embedded_hal_serial_nb_Write;
 use stm32f4xx_hal::syscfg::SysCfg;
 use stm32f4xx_hal::Ptr;
 use stm32f4xx_hal::dma::{DmaChannel, DmaEvent, DmaFlag, MemoryToPeripheral};
@@ -214,10 +212,10 @@ impl<const BUF_LEN: usize, const MAX_FRAME_COUNT: usize> DmaRingBuffer<BUF_LEN, 
 
             match section.kind {
                 RbSectionKind::Discarded => {
-                    dev_debug!("Polled discard frame: {}", section.len);
+                    dev_trace!("Polled discard frame: {}", section.len);
                 }
                 RbSectionKind::Frame => {
-                    dev_debug!("Polled frame: {}", section.len);
+                    dev_trace!("Polled frame: {}", section.len);
                     self.copy_next_read_buffer_bytes(read_off, &mut buf[0..section.len as usize]);
                     return Ok(section.len);
                 }

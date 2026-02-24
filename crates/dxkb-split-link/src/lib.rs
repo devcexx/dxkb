@@ -177,7 +177,6 @@ impl<M> FrameContentEnvelope<M> {
                 size_of::<FrameContentEnvelope<M>>(),
             )
         };
-        dev_info!("CRC calculation of {:?}", self_bytes);
         SPLIT_BUS_CRC.checksum(self_bytes)
     }
 
@@ -472,7 +471,7 @@ where
                     }
 
                     if self.user_msg_pending_ack_sent_time.is_some() {
-                        dev_debug!(
+                        dev_trace!(
                             "Successfully ACK'ed message with seq: {}",
                             frame.envelope.seq
                         );

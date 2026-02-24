@@ -39,6 +39,7 @@ use dxkb_peripheral::key_matrix::{
 };
 use dxkb_common::bus::BusWrite;
 use dxkb_common::bus::BusRead;
+use dxkb_peripheral::BootloaderUtil;
 use keys::{CustomKey, CustomKeyContext};
 use log::{info, Log, Record};
 #[allow(unused_imports)]
@@ -69,7 +70,7 @@ use usb_device::bus::UsbBusAllocator;
 use usb_device::device::{StringDescriptors, UsbVidPid};
 
 // The total layers of the layout.
-const LAYERS: u8 = 1;
+const LAYERS: u8 = 2;
 
 // The dimensions of each side of the keyboard.
 const SIDE_ROWS: u8 = 3;
@@ -111,7 +112,7 @@ type KeyMatrixT = KeyMatrix<
     SIDE_ROWS,
     SIDE_COLS,
     KeyMatrixRowPins,
-    PinsWithSamePort<KeyMatrixColPins>,
+    KeyMatrixColPins,
     RowScan,
     KeyMatrixDebounce,
 >;
@@ -197,7 +198,7 @@ fn init_key_matrix(rows: KeyMatrixRowPins, cols: KeyMatrixColPins, clocks: &Cloc
     KeyMatrixT::new(
         clocks.sysclk(),
         rows,
-        cols.into_input_pins_with_same_port(),
+        cols,
         debouncer,
     )
 }
@@ -212,9 +213,18 @@ fn build_keyboard_layout() -> LayoutT {
                 {
                     name: "base",
                     rows: [
-                        [c:VolDown, c:VolUp, 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+                        ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
                         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
-                        [u:Plus, 'X', 'C', 'V', 'B', 'N', 'M', ',', '.', f:PshLyr(1)],
+                        [u:Plus, 'X', 'C', 'V', f:PshLyrT(1), 'N', 'M', ',', '.', f:PshLyrT(1)],
+                    ]
+                },
+
+                {
+                    name: "test1",
+                    rows: [
+                        ['Q', 'W', 'J', 'R', Caps, 'Y', 'U', 'I', 'O', 'P'],
+                        ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
+                        [u:Plus, 'X', 'C', 'V', f:PshLyrT(1), 'N', 'M', ',', '.', f:PshLyrT(1)],
                     ]
                 }
             ]
@@ -228,6 +238,10 @@ fn main() -> ! {
 }
 
 fn main0() -> ! {
+    unsafe {
+        BootloaderUtil::handle_bootloader_enter_request();
+    }
+
     let mut dp = pac::Peripherals::take().unwrap();
     let mut cortex = cortex_m::Peripherals::take().unwrap();
 
@@ -239,7 +253,6 @@ fn main0() -> ! {
         .sysclk(96.MHz())
         .pclk1(48.MHz())
         .pclk2(48.MHz())
-        .require_pll48clk()
         .freeze();
 
     let gpioa = dp.GPIOA.split();

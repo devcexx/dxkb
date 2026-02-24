@@ -586,9 +586,25 @@ pub trait HandleKey: Sized + Clone {
 }
 
 pub trait KeyboardStateLike {
-    fn push_layer_raw(&mut self, new_layer: u8) -> bool;
+    /// Pushes the current active onto the stack, and makes the given layer active.
+    /// If the given new layer is out of bounds, the function returns None. Otherwise,
+    /// it returns the previous active layer.
+    fn push_layer_raw(&mut self, new_layer: u8) -> Option<u8>;
+
+    /// Pops out the latest layer out of the stack and makes it the new active
+    /// layer. If the stack is empty, None is returned, and no change is done to
+    /// the current layer. Otherwise, the current layer is changed and the
+    /// previous active layer index is returned.
     fn pop_layer_raw(&mut self) -> Option<u8>;
+
+    /// Pushes the current active layer onto the stack, and makes the next one
+    /// the active layer. If the current active layer is the last one, the
+    /// function returns false, and no change is done to the current layer.
+    /// Otherwise, it returns true.
     fn push_next_layer(&mut self) -> bool;
+
+    /// Gets the current active layer index.
+    fn current_layer_raw(&self) -> u8;
 }
 
 pub struct KeyboardState<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8>
@@ -600,10 +616,7 @@ where
     [(); ROWS as usize]:,
     ConstCond<{ LAYERS > 0 }>: IsTrue,
 {
-    // Since ringbuffer doesn't implement any kind of "pop" operation
-    // for dropping the most recently added element, for now I'm using
-    // a Vec as alternative. If the stack gets out of memory, it will
-    // smash the tip of the stack to make room for the new element.
+    // Once the stack gets full, it will smash the last recent entry to make room for the new one.
     layers_stack: Vec<BoundedU8<LAYERS>, 8>,
 
     // TODO We could have a list of keys pressed here, that indicates the exact
@@ -659,22 +672,28 @@ where
         changed
     }
 
-    fn push_layer(&mut self, new_layer: BoundedU8<LAYERS>) -> bool {
+    fn set_active_layer(&mut self, layer: BoundedU8<LAYERS>) {
+        dev_info!("New active layer: {}", layer.value());
+        self.current_layer = layer;
+    }
+
+    fn push_layer(&mut self, new_layer: BoundedU8<LAYERS>) {
         let len = self.layers_stack.len();
-        if let Err(_) = self.layers_stack.push(new_layer) {
-            self.layers_stack[len - 1] = new_layer;
+        if let Err(_) = self.layers_stack.push(self.current_layer) {
+            self.layers_stack[len - 1] = self.current_layer;
         }
-        self.current_layer = new_layer;
-        true
+        dev_info!("Pushed layer onto stack: {}", self.current_layer.value());
+        self.set_active_layer(new_layer);
     }
 
     fn pop_layer(&mut self) -> Option<BoundedU8<LAYERS>> {
         if let Some(head) = self.layers_stack.pop() {
+            let prev = self.current_layer;
             dev_trace!("Popped layer: {}", head);
-            self.current_layer = head;
-            Some(head)
+            self.set_active_layer(head);
+            Some(prev)
         } else {
-            dev_warn!("No layers to pop were available");
+            dev_warn!("Failed to pop layer: Layer stack was empty");
             None
         }
     }
@@ -689,18 +708,18 @@ where
     [(); ROWS as usize]:,
     ConstCond<{ LAYERS > 0 }>: IsTrue,
 {
-    fn push_layer_raw(&mut self, new_layer: u8) -> bool {
+    fn push_layer_raw(&mut self, new_layer: u8) -> Option<u8> {
         let Some(layer_index) = BoundedU8::from_value(new_layer) else {
-            dev_warn!("Requested new layer out of bounds: {}", new_layer);
-            return false; // Out of bounds
+            dev_warn!("Requested layer out of bounds: {}", new_layer);
+            return None; // Out of bounds
         };
-
+        let prev = self.current_layer;
         self.push_layer(layer_index);
-        true
+        Some(prev.value())
     }
 
     fn pop_layer_raw(&mut self) -> Option<u8> {
-        self.pop_layer().map(|x| x.index())
+        self.pop_layer().map(|x| x.value())
     }
 
     fn push_next_layer(&mut self) -> bool {
@@ -710,6 +729,10 @@ where
         } else {
             false
         }
+    }
+
+    fn current_layer_raw(&self) -> u8 {
+        todo!()
     }
 }
 
@@ -768,6 +791,6 @@ where
 
     #[inline(always)]
     fn get_key_definition(&self, layer: BoundedU8<LAYERS>, real_row: u8, real_col: u8) -> &Key {
-        self.layers[layer.index() as usize].get_key_definition(real_row, real_col)
+        self.layers[layer.value() as usize].get_key_definition(real_row, real_col)
     }
 }

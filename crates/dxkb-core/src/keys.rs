@@ -53,9 +53,7 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             do_on_key_state!(
                 key_state,
                 {
-                    if !kb.state_mut().push_next_layer() {
-                        dev_info!("No more upper layers available");
-                    }
+                    let _ = kb.state_mut().push_next_layer();
                 },
                 {}
             );
@@ -64,9 +62,7 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             do_on_key_state!(
                 key_state,
                 {
-                    if !kb.state_mut().push_layer_raw(*new) {
-                        dev_warn!("No layer at index {new} available");
-                    }
+                    let _ = kb.state_mut().push_layer_raw(*new);
                 },
                 {}
             );
@@ -75,9 +71,7 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             do_on_key_state!(
                 key_state,
                 {
-                    if kb.state_mut().pop_layer_raw().is_some() {
-                        dev_warn!("No layers to pop");
-                    }
+                    let _ = kb.state_mut().pop_layer_raw();
                 },
                 {}
             );
@@ -86,12 +80,10 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             do_on_key_state!(
                 key_state,
                 {
-                    if !kb.state_mut().push_next_layer() {
-                        dev_info!("No more upper layers available");
-                    }
+                    let _ = kb.state_mut().push_next_layer();
                 },
                 {
-                    kb.state_mut().pop_layer_raw();
+                    let _ = kb.state_mut().pop_layer_raw();
                 }
             );
         }
@@ -99,12 +91,10 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             do_on_key_state!(
                 key_state,
                 {
-                    if !kb.state_mut().push_layer_raw(*new) {
-                        dev_warn!("No layer at index {new} available");
-                    }
+                    let _ = kb.state_mut().push_layer_raw(*new);
                 },
                 {
-                    kb.state_mut().pop_layer_raw();
+                    let _ = kb.state_mut().pop_layer_raw();
                 }
             );
         }
@@ -245,6 +235,32 @@ macro_rules! hid_key_from_alias {
     ('8') => { ::usbd_hid::descriptor::KeyboardUsage::Keyboard8Asterisk };
     ('9') => { ::usbd_hid::descriptor::KeyboardUsage::Keyboard9OpenParens };
 
+    // Other aliases
+    (Esc) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardEscape };
+    (LCtl) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardLeftControl };
+    (RCtl) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardRightControl };
+    (LSft) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardLeftShift };
+    (RSft) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardRightShift };
+    (LAlt) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardLeftAlt };
+    (RAlt) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardRightAlt };
+    (LWin) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardLeftGUI };
+    (RWin) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardRightGUI };
+    (LGui) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardLeftGUI };
+    (RGui) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardRightGUI };
+    (Bksp) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardBackspace };
+    (Home) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardHome };
+    (End) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardEnd };
+    (PrScr) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardPrintScreen };
+    (Up) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardUpArrow };
+    (Down) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardDownArrow };
+    (Left) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardLeftArrow };
+    (Right) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardRightArrow };
+    (Insrt) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardInsert };
+    (Del) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardDelete };
+    (Caps) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardCapsLock };
+    (PgUp) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardPageUp };
+    (PgDn) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardPageDown };
+
     ('`') => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardBacktickTilde };
     ('\\') => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardBackslashBar };
     (',') => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardCommaLess };
@@ -257,6 +273,7 @@ macro_rules! hid_key_from_alias {
     ("'") => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardSingleDoubleQuote };
     ('\'') => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardSingleDoubleQuote };
     (' ') => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardSpacebar };
+    (Spc) => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardSpacebar };
     (';') => { ::usbd_hid::descriptor::KeyboardUsage::KeyboardSemiColon };
 
     // Function (F1, F2, ...) keys don't need any further alias, they can use
@@ -306,6 +323,12 @@ macro_rules! consumer_control_usage_from_alias {
     (VolDown) => {
         ::hut::Consumer::VolumeDecrement
     };
+    (VUp) => {
+        ::hut::Consumer::VolumeIncrement
+    };
+    (VDn) => {
+        ::hut::Consumer::VolumeDecrement
+    };
     (Pwr) => {
         ::hut::Consumer::Power
     };
@@ -313,6 +336,9 @@ macro_rules! consumer_control_usage_from_alias {
         ::hut::Consumer::Restart
     };
     (Sleep) => {
+        ::hut::Consumer::Sleep
+    };
+    (Slp) => {
         ::hut::Consumer::Sleep
     };
     (BrightUp) => {
@@ -324,10 +350,19 @@ macro_rules! consumer_control_usage_from_alias {
     (PlayPause) => {
         ::hut::Consumer::PlayPause
     };
+    (Ply) => {
+        ::hut::Consumer::PlayPause
+    };
     (Next) => {
         ::hut::Consumer::ScanNextTrack
     };
     (Prev) => {
+        ::hut::Consumer::ScanPreviousTrack
+    };
+    (Nxt) => {
+        ::hut::Consumer::ScanNextTrack
+    };
+    (Prv) => {
         ::hut::Consumer::ScanPreviousTrack
     };
 

@@ -1,0 +1,37 @@
+[package]
+name = "dxkb-lily58l-stemcell"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+stm32f411 = ["stm32f4xx-hal/stm32f411", "dxkb-peripheral/stm32f411"]
+side-left = []
+side-right = []
+usb-force-master = []
+usb-force-slave = []
+trace = ["dxkb-common/dev-log-level-trace"]
+
+
+[dependencies]
+dxkb-common = { path = "../dxkb-common", features = ["dev-log-level-info"] }
+dxkb-core = { path = "../dxkb-core" }
+dxkb-peripheral = { path = "../dxkb-peripheral" }
+dxkb-split-link = { path = "../dxkb-split-link" }
+dxkb-proc-macros = { path = "../dxkb-proc-macros" }
+
+cortex-m = { workspace = true }
+cortex-m-rt = { workspace = true }
+itm_logger = { workspace = true }
+log = { workspace = true }
+panic-itm = { workspace = true }
+ringbuffer = { workspace = true, default-features = false }
+seq-macro = { workspace = true }
+serde = { workspace = true, default-features = false, features = ["derive"] }
+ssmarshal = { workspace = true, default-features = false }
+stm32f4xx-hal = { workspace = true, features = ["usb_fs"] }
+synopsys-usb-otg = { workspace = true, features = ["cortex-m", "fs"] }
+usb-device = { workspace = true }
+usbd-hid = { workspace = true }
+vcell = { workspace = true }
+heapless.workspace = true
+hut.workspace = true

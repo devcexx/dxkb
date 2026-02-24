@@ -9,7 +9,7 @@ use super::{ConstCond, IsTrue};
 pub struct BitArraySize<const N: usize>;
 
 impl<const N: usize> BitArraySize<N> {
-    const SIZE: usize = 1 + ((N - 1) / 8);
+    pub const SIZE: usize = 1 + ((N - 1) / 8);
 }
 
 #[repr(transparent)]
@@ -29,6 +29,15 @@ where
         Self {
             buf: [0; BitArraySize::<N>::SIZE],
         }
+    }
+
+    pub fn new_from_values(values: &[bool; N]) -> Self {
+        let mut array = Self::new();
+        for i in 0..N {
+            array.put(i, values[i]);
+        }
+
+        array
     }
 
     fn assert_within_bounds(index: usize) {

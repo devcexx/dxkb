@@ -1,12 +1,14 @@
+use core::ffi::CStr;
+
 use bitflags::bitflags;
 use dxkb_common::{
-    dev_debug, dev_error, dev_trace,
-    util::{BitArray, ConstU8, ConstU8Like},
+    dev_debug, dev_error, dev_info, dev_trace, dev_warn, util::{BitArray, ConstU8, ConstU8Like}
 };
+use dxkb_peripheral::BootloaderUtil;
 use hut::Consumer;
 use usb_device::{
     bus::{UsbBus, UsbBusAllocator},
-    device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbVidPid},
+    device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbRev, UsbVidPid},
 };
 use usbd_hid::{
     UsbError,
@@ -188,12 +190,17 @@ const REPORT_HID_KEYBOARD_DESCRIPTOR: [u8; 76] =[
     0xc0,                                                   // End Collection
 ];
 
-const DEBUG_EP_DESCRIPTOR: [u8; 14] = [
+const DEBUG_EP_DESCRIPTOR: [u8; 23] = [
     0x0b, 0x00, 0x00, 0x00, 0x00,  // USAGE (Generic Desktop:Undefined)
     0x06, 0x00, 0xff,              // USAGE_PAGE (Vendor Defined Page 1)
-    0x75, 0x08,                    // REPORT_SIZE (8)
-    0x95, 0x40,                    // REPORT_COUNT (64)
-    0x81, 0x02                     // OUTPUT (Data,Var,Abs)
+    0xa1, 0x01,                    // COLLECTION (Application)
+    0x75, 0x08,                    //   REPORT_SIZE (8)
+    0x95, 0x40,                    //   REPORT_COUNT (64)
+    0x81, 0x02,                    //   INPUT (Data,Var,Abs)
+    0x75, 0x08,                    //   REPORT_SIZE (8)
+    0x95, 0x40,                    //   REPORT_COUNT (64)
+    0x91, 0x02,                    //   OUTPUT (Data,Var,Abs)
+    0xc0                           // END_COLLECTION
 ];
 
 #[derive(IntoBytes, Immutable)]
@@ -317,6 +324,7 @@ impl<'a, B: UsbBus, const DBG_SIZE: usize> ReportHidKeyboard<'a, B, DBG_SIZE> {
 
         let usb_dev =
             UsbDeviceBuilder::new(allocator, UsbVidPid(settings.vid_pid.0, settings.vid_pid.1))
+                .usb_rev(UsbRev::Usb200)
                 .strings(settings.string_descriptors)
                 .unwrap()
                 .build();
@@ -491,6 +499,15 @@ impl<'a, B: UsbBus, const DBG_SIZE: usize> HidKeyboard for ReportHidKeyboard<'a,
             let r = self.debug_ep.push_raw_input(&debug_buf[0..count]);
             if let Ok(_) = r {
                 self.logger.drop_pending_bytes(count);
+            }
+        }
+
+        if let Ok(info) = self.debug_ep.pull_raw_report(&mut debug_buf) {
+            if &debug_buf[0..info.len] == b"enter-dfu" || &debug_buf[0..info.len] == b"enter-dfu\n" {
+                dev_info!("Requested entering into DFU mode...");
+                BootloaderUtil::enter_bootloader();
+            } else {
+                dev_warn!("Ignored unknown debug request: {:02x?}", &debug_buf[0..info.len]);
             }
         }
 

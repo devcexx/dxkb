@@ -10,8 +10,7 @@ use stm32f4xx_hal::{
 };
 
 use dxkb_common::{
-    KeyState, dev_info, dev_trace,
-    util::{BitMatrix, BitMatrixLayout, ColBitMatrixLayout},
+    dev_trace, util::{BitArray, BitArraySize, BitMatrix, BitMatrixLayout, ColBitMatrixLayout}, KeyState
 };
 
 use super::gpio::{GpioPort, GpioX};
@@ -65,6 +64,51 @@ macro_rules! output_pins_impl {
         $(
         seq_macro::seq!(i in 0..$npins {
             output_pins_impl!(@ $npins, #(P~i N~i)*, #(i)*);
+        });
+        )*
+    }
+}
+
+macro_rules! input_pins_impl {
+    (@ $npins:literal, $($port_const:ident $pin_const:ident)*, $($pin_lit:literal)*) => {
+        impl <$(const $port_const: char, const $pin_const: u8),*> Pins for (
+            $(
+                 Pin<$port_const, $pin_const, Input>
+            ),*
+        ) {
+            const COUNT: u8 = $npins;
+        }
+
+        impl <$(const $port_const: char, const $pin_const: u8),*> InputPins<$npins> for (
+            $(
+                 Pin<$port_const, $pin_const, Input>
+            ),*
+        ) {
+            type ReadResult = RawReadResults<$npins>;
+
+            fn read_inputs(&self) -> Self::ReadResult {
+                let mut reads = [false; $npins];
+                seq_macro::seq!(N in 0..$npins {
+                    reads[N] = self.N.is_low();
+                });
+
+                RawReadResults {
+                    read_result: BitArray::new_from_values(&reads)
+                }
+            }
+
+            fn setup_pins(&mut self) {
+                seq_macro::seq!(N in 0..$npins {
+                    self.N.set_internal_resistor(stm32f4xx_hal::gpio::Pull::Up);
+                });
+            }
+        }
+    };
+
+    ($($npins:literal),*) => {
+        $(
+        seq_macro::seq!(i in 0..$npins {
+            input_pins_impl!(@ $npins, #(P~i N~i)*, #(i)*);
         });
         )*
     }
@@ -139,22 +183,36 @@ macro_rules! input_pins_same_port_impl {
 }
 
 // Implement [`OutputPins`] for different number of pins.
-output_pins_impl!(2, 3, 4, 5);
+output_pins_impl!(2, 3, 4, 5, 6);
+
+
+// Implement [`InputPins`] for different number of pins.
+input_pins_impl!(2, 3, 4, 5, 6);
 
 // Implement [`IntoInputPinsWithSamePort`] for different
 // number of pins. This allows converting a tuple of pins into [`PinsWithSamePort<T>`],
 // so that all pins can be read at once from a single register.
-into_pins_with_same_port_impl!(2, 3, 4, 5);
+into_pins_with_same_port_impl!(2, 3, 4, 5, 6);
 
 // Implement [`InputPins`] for different number of pins, that are
 // located at the same GPIO port.
-input_pins_same_port_impl!(2, 3, 4, 5);
+input_pins_same_port_impl!(2, 3, 4, 5, 6);
 
 /// Holds the result of reading a GPIO register that holds the input
 /// value of multiple pins, defined by the type T.
 pub struct SamePortReadResults<T> {
     read_value: u32,
     _data: PhantomData<T>,
+}
+
+pub struct RawReadResults<const N: usize> where [(); BitArraySize::<N>::SIZE]: {
+    read_result: BitArray<N>
+}
+
+impl<const N: usize> InputRead for RawReadResults<N> where [(); BitArraySize::<N>::SIZE]: {
+    fn is_on(&self, pin_index: u8) -> bool {
+        self.read_result.get(pin_index as usize)
+    }
 }
 
 /// Represents a type that can be converted into a type (that conforms
@@ -176,6 +234,11 @@ pub struct PinsWithSamePort<T> {
 /// Represents a type that holds a read of the status of multiple
 /// input pins.
 pub trait InputRead {
+    /// Returns true if the input of the pin indicates that the pin is "on". By
+    /// "on", we refer "on" from the user perspective, and not from the
+    /// electrical perspective. In an active-low configuration, like the one
+    /// implemented in the key matrix, it should be considered that a pin is
+    /// "on" when its input is low.
     fn is_on(&self, pin_index: u8) -> bool;
 }
 
@@ -525,7 +588,7 @@ where
                     has_changed = true;
                     self.set_key_state(row, col, effective_state);
                     changed_fn(row, col, effective_state);
-                    dev_info!(
+                    dev_trace!(
                         "{:?} ({}; {}) ({} ms)",
                         effective_state,
                         row,

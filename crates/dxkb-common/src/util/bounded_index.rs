@@ -52,7 +52,7 @@ impl<const LENGTH: u8> BoundedU8<LENGTH> {
     }
 
     #[inline(always)]
-    pub fn index(&self) -> u8 {
+    pub fn value(&self) -> u8 {
         self.0
     }
 
