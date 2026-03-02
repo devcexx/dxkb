@@ -1,5 +1,5 @@
 use dxkb_core::{hid::ReportHidKeyboard, keyboard::{Left, Right, PinMasterSense, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig}, keys::DefaultKey};
-use dxkb_peripheral::{clock::DWTClock, key_matrix::{DebouncerEagerPerKey, KeyMatrix, PinsWithSamePort, RowScan}, uart_dma_rb::{HalfDuplex, UartDmaRb}};
+use dxkb_peripheral::{clock::DWTClock, key_matrix::{DebouncerEagerPerKey, KeyMatrix, OversamplingRead, PinsWithSamePort, RowScan, SingleShotRead}, uart_dma_rb::{HalfDuplex, UartDmaRb}};
 use dxkb_split_link::{SplitBus, TestingTimings};
 use stm32f4xx_hal::{dma::{Stream5, Stream6, Stream7}, gpio::{Input, Output, Pin, PushPull}, otg_fs::USB, pac::{DMA1, DMA2, USART1, USART2}, signature::Uid};
 use synopsys_usb_otg::UsbBus;
@@ -68,6 +68,7 @@ pub type TKeyMatrix = KeyMatrix<
     KeyMatrixColPins,
     RowScan,
     TKeyMatrixDebounce,
+    OversamplingRead<8, 2>
 >;
 
 pub type TLayout = SplitKeyboardLayout<KeyboardLayoutConfig, CustomKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;

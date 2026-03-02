@@ -5,6 +5,7 @@ mod const_expr;
 mod const_num;
 mod frombytes;
 mod ringbuffer;
+pub mod slice;
 
 pub use bitarray::*;
 pub use bitmatrix::*;

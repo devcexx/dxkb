@@ -10,7 +10,7 @@ use stm32f4xx_hal::{
 };
 
 use dxkb_common::{
-    dev_trace, util::{BitArray, BitArraySize, BitMatrix, BitMatrixLayout, ColBitMatrixLayout}, KeyState
+    dev_info, dev_trace, util::{self, bit_array_size, BitArray, BitArraySize, BitMatrix, BitMatrixLayout, ColBitMatrixLayout}, KeyState
 };
 
 use super::gpio::{GpioPort, GpioX};
@@ -205,13 +205,34 @@ pub struct SamePortReadResults<T> {
     _data: PhantomData<T>,
 }
 
-pub struct RawReadResults<const N: usize> where [(); BitArraySize::<N>::SIZE]: {
-    read_result: BitArray<N>
+pub struct RawReadResults<const PINS: u8> where [(); bit_array_size(PINS as usize)]: {
+    read_result: BitArray<{PINS as usize}>
 }
 
-impl<const N: usize> InputRead for RawReadResults<N> where [(); BitArraySize::<N>::SIZE]: {
+impl<const N: u8> InputRead for RawReadResults<N> where [(); bit_array_size(N as usize)]: {
     fn is_on(&self, pin_index: u8) -> bool {
         self.read_result.get(pin_index as usize)
+    }
+}
+
+pub struct OversamplingReadResults<const OVER: usize, T: InputRead> {
+    read_result: [T; OVER],
+}
+
+impl <const OVER: usize, T: InputRead> InputRead for OversamplingReadResults<OVER, T> {
+    fn is_on(&self, pin_index: u8) -> bool {
+        let mut on_count = 0;
+        for i in 0..OVER {
+            if self.read_result[i].is_on(pin_index) {
+                on_count += 1;
+            }
+
+            if on_count >= OVER / 2 {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
@@ -254,6 +275,56 @@ pub trait InputPins<const C: u8>: Pins {
     fn read_inputs(&self) -> Self::ReadResult;
     fn setup_pins(&mut self);
 }
+
+/**
+ * Represents a type that is able to read one or multiple times from a set of input pins, returning the result of folding all the results of every read sample.
+ */
+pub trait AggregateRead {
+    type ReadResult<const PINS: u8, Src: InputPins<PINS>>: InputRead;
+
+    fn read_all<const PINS: u8, T: InputPins<PINS>>(pins: &T) -> Self::ReadResult<PINS, T>;
+}
+
+/**
+ * Indicates that each pin must be read exactly once for each matrix scan.
+ */
+pub struct SingleShotRead;
+
+impl AggregateRead for SingleShotRead {
+    type ReadResult<const PINS: u8, Src: InputPins<PINS>> = Src::ReadResult;
+
+    fn read_all<const PINS: u8, T: InputPins<PINS>>(pins: &T) -> Self::ReadResult<PINS, T> {
+        pins.read_inputs()
+    }
+}
+
+/**
+ * Indicates that each pin will be read [`OVER`] number of times for each matrix
+ * scan, leaving a delay between each sample read.
+ */
+pub struct OversamplingRead<
+    const OVER: usize = 16,
+    const DELAY_CYCLES: u32 = 2>
+;
+
+impl <
+    const OVER: usize,
+    const DELAY_CYCLES: u32
+> AggregateRead for OversamplingRead<OVER, DELAY_CYCLES> {
+    type ReadResult<const PINS: u8, Src: InputPins<PINS>> = OversamplingReadResults<OVER, Src::ReadResult>;
+
+    fn read_all<const PINS: u8, T: InputPins<PINS>>(pins: &T) -> Self::ReadResult<PINS, T> {
+        let results = util::slice::array_initialize(|_| {
+            cortex_m::asm::delay(DELAY_CYCLES);
+            pins.read_inputs()
+        });
+
+        OversamplingReadResults {
+            read_result: results
+        }
+    }
+}
+
 
 /// Represents a type that holds a set of pins that can be turned on
 /// or off individually for scanning a key matrix.
@@ -495,10 +566,11 @@ pub trait KeyMatrixLike<const ROWS: u8, const COLS: u8> {
 ///      and the columns are read all at once. In this mode, RowPins needs to
 ///      hold output pins, and ColPins needs to hold input pins.
 
-pub struct KeyMatrix<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D>
+pub struct KeyMatrix<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D, R>
 where
     [(); ROWS as usize]:,
     S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
+    R: AggregateRead,
     ColBitMatrixLayout<COLS>: BitMatrixLayout,
 {
     matrix: BitMatrix<{ ROWS as usize }, COLS>,
@@ -508,12 +580,13 @@ where
     sysclk_freq: Hertz, // TODO Change by usage of Clock trait
 }
 
-impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D>
-    KeyMatrix<ROWS, COLS, RowPins, ColPins, S, D>
+impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D, R>
+    KeyMatrix<ROWS, COLS, RowPins, ColPins, S, D, R>
 where
     [(); ROWS as usize]:,
     S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
     D: Debounce<ROWS, COLS>,
+    R: AggregateRead,
     ColBitMatrixLayout<COLS>: BitMatrixLayout,
     S::InPins: InputPins<{ S::InPins::COUNT }>,
     S::OutPins: OutputPins<{ S::OutPins::COUNT }>,
@@ -533,12 +606,13 @@ where
     }
 }
 
-impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D> KeyMatrixLike<ROWS, COLS>
-    for KeyMatrix<ROWS, COLS, RowPins, ColPins, S, D>
+impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D, R> KeyMatrixLike<ROWS, COLS>
+    for KeyMatrix<ROWS, COLS, RowPins, ColPins, S, D, R>
 where
     [(); ROWS as usize]:,
     S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
     D: Debounce<ROWS, COLS>,
+    R: AggregateRead,
     ColBitMatrixLayout<COLS>: BitMatrixLayout,
     S::InPins: InputPins<{ S::InPins::COUNT }>,
     S::OutPins: OutputPins<{ S::OutPins::COUNT }>,
@@ -562,15 +636,14 @@ where
         for output_pin_index in 0..S::OutPins::COUNT {
             self.output_pins.set_state(output_pin_index, PinState::Low);
             fence(Ordering::SeqCst);
-            unsafe {
-                // Wait a couple of cycles to let the gpio pin
-                // stabilize. I guess this should take around... 10 ns
-                // with OSPEEDR set to medium. So at 96 MHz, two dummy
-                // instructions are more than enough.
-                cortex_m::asm::delay(10);
-            }
 
-            let inputs = self.input_pins.read_inputs();
+            // Wait a couple of cycles to let the gpio pin
+            // stabilize. I guess this should take around... 10 ns
+            // with OSPEEDR set to medium. So at 96 MHz, two dummy
+            // instructions are more than enough.
+            cortex_m::asm::delay(2);
+
+            let inputs = R::read_all(&self.input_pins);
             fence(Ordering::SeqCst);
             self.output_pins.set_state(output_pin_index, PinState::High);
 

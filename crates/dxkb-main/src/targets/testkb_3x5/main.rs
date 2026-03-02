@@ -37,7 +37,7 @@ use dxkb_core::log::RingBufferLogger;
 use dxkb_main::{CurrentSide, MasterCheckType, make_usb_master_checker};
 use dxkb_peripheral::clock::DWTClock;
 use dxkb_peripheral::key_matrix::{
-    DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, PinsWithSamePort, RowScan,
+    DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, OversamplingRead, PinsWithSamePort, RowScan, SingleShotRead
 };
 use dxkb_common::bus::BusWrite;
 use dxkb_common::bus::BusRead;
@@ -55,7 +55,7 @@ use ringbuffer::ConstGenericRingBuffer;
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::alt::sys;
 use stm32f4xx_hal::gpio::{Input, Output, Pin, PushPull};
-use stm32f4xx_hal::pac::{Interrupt, DMA2, EXTI, USART1};
+use stm32f4xx_hal::pac::{Interrupt, DMA2, DWT, EXTI, USART1};
 use stm32f4xx_hal::rcc::Clocks;
 use stm32f4xx_hal::signature::Uid;
 use stm32f4xx_hal::syscfg::SysCfg;
@@ -118,6 +118,7 @@ type KeyMatrixT = KeyMatrix<
     KeyMatrixColPins,
     RowScan,
     KeyMatrixDebounce,
+    SingleShotRead
 >;
 
 type SplitBusUsart = USART1;
@@ -261,8 +262,8 @@ fn main0() -> ! {
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
 
-    //itm_logger::init_with_level(log::Level::Trace).unwrap();
-    RingBufferLogger::install(unsafe { &HID_LOGGER }).unwrap();
+    itm_logger::init_with_level(log::Level::Trace).unwrap();
+    //RingBufferLogger::install(unsafe { &HID_LOGGER }).unwrap();
 
     dev_info!("Device startup. Device configuration:");
     dev_info!(" - Current Side: {:?}", type_name::<CurrentSide>());

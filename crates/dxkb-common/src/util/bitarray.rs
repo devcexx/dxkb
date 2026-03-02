@@ -6,6 +6,11 @@ use super::{ConstCond, IsTrue};
 //     const SIZE: usize = 1 + ((N - 1) / 8);
 // }
 //
+//
+pub const fn bit_array_size(n: usize) -> usize {
+    1 + ((n - 1) / 8)
+}
+
 pub struct BitArraySize<const N: usize>;
 
 impl<const N: usize> BitArraySize<N> {
@@ -16,18 +21,18 @@ impl<const N: usize> BitArraySize<N> {
 #[derive(Clone, FromBytes, IntoBytes, Immutable, Debug)]
 pub struct BitArray<const N: usize>
 where
-    [(); BitArraySize::<N>::SIZE]:,
+    [(); bit_array_size(N)]:,
 {
-    buf: [u8; BitArraySize::<N>::SIZE],
+    buf: [u8; bit_array_size(N)],
 }
 
 impl<const N: usize> BitArray<N>
 where
-    [(); BitArraySize::<N>::SIZE]:,
+    [(); bit_array_size(N)]:,
 {
     pub const fn new() -> Self {
         Self {
-            buf: [0; BitArraySize::<N>::SIZE],
+            buf: [0; bit_array_size(N)],
         }
     }
 
