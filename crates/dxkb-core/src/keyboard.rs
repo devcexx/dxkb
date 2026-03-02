@@ -297,7 +297,7 @@ where
             }
         }
 
-        if let Err(e) = self.hid.poll() {
+        if let Err(e) = self.hid.tick() {
             dev_error!("Usb stalled: {:?}", e);
         }
     }

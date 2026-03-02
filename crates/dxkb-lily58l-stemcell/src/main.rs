@@ -22,12 +22,13 @@ mod layout;
 use config::*;
 
 use cortex_m::interrupt::free;
-use dxkb_common::{dev_info, util::RingBuffer};
-use dxkb_core::{do_on_key_state, hid::HidKeyboard, keyboard::{HandleKey, KeyboardUsage, PinMasterSense}, log::RingBufferLogger};
+use dxkb_common::{dev_info, dev_trace, util::RingBuffer};
+use dxkb_core::{debug::DebugHidFeature, do_on_key_state, hid::HidKeyboard, keyboard::{HandleKey, KeyboardUsage, PinMasterSense}, log::RingBufferLogger};
 use core::any::type_name;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
-use dxkb_core::hid::{BasicKeyboardSettings, ReportHidKeyboard};
+use dxkb_core::hid::ReportHidKeyboard;
+use dxkb_core::usb::UsbFeatureSet;
 use dxkb_core::keyboard::SplitKeyboardLike;
 
 use dxkb_peripheral::{clock::DWTClock, uart_dma_rb::HalfDuplexInitializer, BootloaderUtil, InterruptReceiver};
@@ -50,7 +51,7 @@ use stm32f4xx_hal::{
     rcc::RccExt,
 };
 use synopsys_usb_otg::UsbBus;
-use usb_device::{class::UsbClass, LangID};
+use usb_device::{class::UsbClass, device::{UsbDeviceBuilder, UsbRev}, LangID};
 use usb_device::bus::UsbBusAllocator;
 use usb_device::device::{StringDescriptors, UsbVidPid};
 
@@ -169,20 +170,22 @@ fn main0() -> ! {
         USB_ALLOC.write(UsbBus::new(usb, addr_of_mut!(EP_MEMORY).as_mut().unwrap()))
     };
 
-    let hid = ReportHidKeyboard::alloc(
+    let mut usb_feature_debug = DebugHidFeature::new(usb_alloc, unsafe { &HID_LOGGER });
+
+    let mut usb_feature_kb = ReportHidKeyboard::alloc(
         usb_alloc,
-        &BasicKeyboardSettings {
-            vid_pid: UsbVidPid(0x16c0, 0x27db),
-            string_descriptors: &[StringDescriptors::new(LangID::ES)
+        1
+    );
+
+    let mut usb_dev =
+        UsbDeviceBuilder::new(usb_alloc, UsbVidPid(0x16c0, 0x27db))
+            .usb_rev(UsbRev::Usb200)
+            .strings(&[StringDescriptors::new(LangID::ES)
                 .serial_number("0")
                 .manufacturer("devcexx")
-                .product("STeMCell Lily58L")],
-            poll_ms: 1,
-        },
-        unsafe {
-            &HID_LOGGER
-        },
-    );
+                .product("STeMCell Lily58L")])
+            .unwrap()
+            .build();
 
     let matrix = init_key_matrix(
         (
@@ -217,7 +220,7 @@ fn main0() -> ! {
     let master_tester = PinMasterSense::new(gpioa.pa9.into_pull_down_input());
     unsafe {
         KEYBOARD.write(TKeyboard::new(
-            hid,
+            usb_feature_kb,
             layout::LAYOUT,
             matrix,
             split_bus,
@@ -253,7 +256,7 @@ fn main0() -> ! {
                 kb_context.plus_pending_press = false;
             }
         }
-
+        (kb.hid_mut(), &mut usb_feature_debug).poll_all(&mut usb_dev);
         kb.poll(&mut kb_context);
     }
 }

@@ -18,15 +18,17 @@
 
 mod keys;
 
+use core::alloc;
 use core::any::type_name;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 use dxkb_common::util::RingBuffer;
+use dxkb_core::debug::{DebugHidFeature, NopDebugRead};
 use dxkb_core::hid::HidKeyboard;
 
 use dxkb_common::bus::{BusPollError, BusTransferError, NullBus};
 use dxkb_common::dev_info;
-use dxkb_core::hid::{BasicKeyboardSettings, ReportHidKeyboard};
+use dxkb_core::hid::ReportHidKeyboard;
 use dxkb_core::keyboard::{
     KeyboardUsage, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLike, SplitKeyboardLinkMessage, SplitLayoutConfig
 };
@@ -48,6 +50,7 @@ use panic_itm as _;
 use cortex_m_rt::entry;
 use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, FullDuplex, FullDuplexInitializer, HalfDuplex, HalfDuplexInitializer, UartDmaRb};
 use dxkb_split_link::{SplitBus, TestingTimings};
+use dxkb_core::usb::UsbFeatureSet;
 use ringbuffer::ConstGenericRingBuffer;
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::alt::sys;
@@ -67,7 +70,7 @@ use stm32f4xx_hal::{
 use synopsys_usb_otg::UsbBus;
 use usb_device::LangID;
 use usb_device::bus::UsbBusAllocator;
-use usb_device::device::{StringDescriptors, UsbVidPid};
+use usb_device::device::{StringDescriptors, UsbDeviceBuilder, UsbRev, UsbVidPid};
 
 // The total layers of the layout.
 const LAYERS: u8 = 2;
@@ -147,7 +150,7 @@ type KeyboardT<Hid> = SplitKeyboard<
 static mut EP_MEMORY: [u32; 1024] = [0; 1024];
 static mut SPLIT_BUS_DMA_RX_BUF: DmaRingBuffer<256, 128> = DmaRingBuffer::new();
 static mut SPLIT_BUS_DMA_TX_BUF: [u8; 256] = [0u8; 256];
-static mut KEYBOARD: MaybeUninit<KeyboardT<ReportHidKeyboard<UsbBus<USB>,1024>>> = MaybeUninit::uninit();
+static mut KEYBOARD: MaybeUninit<KeyboardT<ReportHidKeyboard<UsbBus<USB>>>> = MaybeUninit::uninit();
 static mut USB_ALLOC: MaybeUninit<UsbBusAllocator<UsbBus<USB>>> = MaybeUninit::uninit();
 
 static mut HID_LOGGER: RingBufferLogger<1024> = RingBufferLogger::new(log::Level::Trace, RingBuffer::new());
@@ -258,8 +261,8 @@ fn main0() -> ! {
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
 
-    itm_logger::init_with_level(log::Level::Trace).unwrap();
-    // RingBufferLogger::install(unsafe { &HID_LOGGER }).unwrap();
+    //itm_logger::init_with_level(log::Level::Trace).unwrap();
+    RingBufferLogger::install(unsafe { &HID_LOGGER }).unwrap();
 
     dev_info!("Device startup. Device configuration:");
     dev_info!(" - Current Side: {:?}", type_name::<CurrentSide>());
@@ -281,20 +284,22 @@ fn main0() -> ! {
         }))
     };
 
-    let hid = ReportHidKeyboard::alloc(
+    let mut usb_feature_kb = ReportHidKeyboard::alloc(
         usb_alloc,
-        &BasicKeyboardSettings {
-            vid_pid: UsbVidPid(0x16c0, 0x27db),
-            string_descriptors: &[StringDescriptors::new(LangID::ES)
+        1
+    );
+
+    let mut usb_feature_debug = DebugHidFeature::new(usb_alloc, unsafe { &HID_LOGGER });
+
+    let mut usb_dev =
+        UsbDeviceBuilder::new(usb_alloc, UsbVidPid(0x16c0, 0x27db))
+            .usb_rev(UsbRev::Usb200)
+            .strings(&[StringDescriptors::new(LangID::ES)
                 .serial_number("0")
                 .manufacturer("devcexx")
-                .product("dxkb testkb_3x5")],
-            poll_ms: 1,
-        },
-        unsafe {
-            &HID_LOGGER
-        },
-    );
+                .product("dxkb testkb_3x5")])
+            .unwrap()
+            .build();
 
     let matrix = init_key_matrix(
         (
@@ -316,7 +321,7 @@ fn main0() -> ! {
     let master_tester = make_usb_master_checker(gpioa.pa9.into_input());
     unsafe {
         KEYBOARD.write(KeyboardT::new(
-            hid,
+            usb_feature_kb,
             build_keyboard_layout(),
             matrix,
             split_bus,
@@ -351,6 +356,7 @@ fn main0() -> ! {
             }
         }
 
+        (kb.hid_mut(), &mut usb_feature_debug).poll_all(&mut usb_dev);
         kb.poll(&mut key_context);
     }
 }

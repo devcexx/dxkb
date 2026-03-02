@@ -48,7 +48,7 @@ impl<const SIZE: usize> RingBufferLogger<SIZE> {
         })
     }
 
-    pub fn read_pending_bytes<const N: usize>(&self, buf: &mut [u8; N]) -> usize {
+    pub fn read_pending_bytes(&self, buf: &mut [u8]) -> usize {
         free(|cs| {
             self.buf.borrow(cs).borrow().buf.read(buf)
         })

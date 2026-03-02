@@ -1,14 +1,11 @@
-use core::ffi::CStr;
-
 use bitflags::bitflags;
 use dxkb_common::{
-    dev_debug, dev_error, dev_info, dev_trace, dev_warn, util::{BitArray, ConstU8, ConstU8Like}
+    dev_debug, dev_error, dev_trace, util::{BitArray, ConstU8, ConstU8Like}
 };
-use dxkb_peripheral::BootloaderUtil;
 use hut::Consumer;
 use usb_device::{
     bus::{UsbBus, UsbBusAllocator},
-    device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbRev, UsbVidPid},
+    device::{StringDescriptors, UsbVidPid},
 };
 use usbd_hid::{
     UsbError,
@@ -17,7 +14,7 @@ use usbd_hid::{
 };
 use zerocopy::{Immutable, IntoBytes};
 
-use crate::log::RingBufferLogger;
+use crate::usb::UsbFeature;
 
 enum LookOrFindEmptyMutResult<'a, A> {
     Found(&'a mut A),
@@ -62,23 +59,17 @@ pub enum HidKeyboardReleaseError {
     NotPressed,
 }
 
-impl From<UsbError> for KeyboardPollError {
+impl From<UsbError> for KeyboardTickError {
     fn from(value: UsbError) -> Self {
         Self::UsbError(value)
     }
 }
 
 #[derive(Debug)]
-pub enum KeyboardPollError {
+pub enum KeyboardTickError {
     UsbError(UsbError),
     UnknownReport(u8),
     MalformedOutReport,
-}
-
-pub struct BasicKeyboardSettings<'s, 'b> {
-    pub vid_pid: UsbVidPid,
-    pub string_descriptors: &'s [StringDescriptors<'b>],
-    pub poll_ms: u8,
 }
 
 /// A type that is capable of syncing the keyboard status with the USB host
@@ -96,12 +87,13 @@ pub trait HidKeyboard {
     ) -> Result<(), HidKeyboardReleaseError>;
 
     /**
-     * Polls changes in the USB device, and transmits changes pending to be
-     * delivered to the host. Returns `true` if an OUT report has been received
-     * from the host, and something has changed in the state of the device due
-     * to that (right now, the only thing that can change is the LEDs).
+     * Function that must be called periodically for reading the incoming
+     * information from the USB and send new updates. This function may not poll
+     * data from the usb itself. A call to UsbDevice::poll should have happened
+     * prior to the call to this function to fetch the latest changes from the
+     * USB bus.
      */
-    fn poll(&mut self) -> Result<bool, KeyboardPollError>;
+    fn tick(&mut self) -> Result<(), KeyboardTickError>;
     fn leds(&self) -> &BootLeds;
     fn dirty(&self) -> bool;
 }
@@ -190,19 +182,6 @@ const REPORT_HID_KEYBOARD_DESCRIPTOR: [u8; 76] =[
     0xc0,                                                   // End Collection
 ];
 
-const DEBUG_EP_DESCRIPTOR: [u8; 23] = [
-    0x0b, 0x00, 0x00, 0x00, 0x00,  // USAGE (Generic Desktop:Undefined)
-    0x06, 0x00, 0xff,              // USAGE_PAGE (Vendor Defined Page 1)
-    0xa1, 0x01,                    // COLLECTION (Application)
-    0x75, 0x08,                    //   REPORT_SIZE (8)
-    0x95, 0x40,                    //   REPORT_COUNT (64)
-    0x81, 0x02,                    //   INPUT (Data,Var,Abs)
-    0x75, 0x08,                    //   REPORT_SIZE (8)
-    0x95, 0x40,                    //   REPORT_COUNT (64)
-    0x91, 0x02,                    //   OUTPUT (Data,Var,Abs)
-    0xc0                           // END_COLLECTION
-];
-
 #[derive(IntoBytes, Immutable)]
 #[repr(packed)]
 struct ReportHidKeyboardInReport {
@@ -284,25 +263,17 @@ impl<R> MutableReport<R> {
 /**
  * A HID Keyboard that uses the Report protocol for communicating with the host.
  */
-pub struct ReportHidKeyboard<'a, B: UsbBus, const DBG_SIZE: usize> {
-    usb_dev: UsbDevice<'a, B>,
+pub struct ReportHidKeyboard<'a, B: UsbBus> {
     ep: HIDClass<'a, B>,
-    // TODO This shouldn't be here, but right now the ReportHidKeyboard struct
-    // owns the usb polling. This must be kept out of here, I guess.
-    //
-    // TODO Gate behind a feature.
-    debug_ep: HIDClass<'a, B>,
-    logger: &'static RingBufferLogger<DBG_SIZE>,
     kb: MutableReport<ReportHidKeyboardInReport>,
     cc: MutableReport<ReportHidConsumerControlInReport>,
     leds: BootLeds,
 }
 
-impl<'a, B: UsbBus, const DBG_SIZE: usize> ReportHidKeyboard<'a, B, DBG_SIZE> {
+impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
     pub fn alloc<'s>(
         allocator: &'a UsbBusAllocator<B>,
-        settings: &'s BasicKeyboardSettings<'s, 'a>,
-        logger: &'static RingBufferLogger<DBG_SIZE>,
+        poll_ms: u8
     ) -> Self {
         let mut hid_settings = HidClassSettings::default();
         hid_settings.protocol = HidProtocol::Keyboard;
@@ -311,29 +282,12 @@ impl<'a, B: UsbBus, const DBG_SIZE: usize> ReportHidKeyboard<'a, B, DBG_SIZE> {
         let ep = HIDClass::new_ep_in_with_settings(
             allocator,
             &REPORT_HID_KEYBOARD_DESCRIPTOR,
-            settings.poll_ms,
+            poll_ms,
             hid_settings,
         );
 
-        let debug_ep = HIDClass::new_ep_in_with_settings(
-            allocator,
-            &DEBUG_EP_DESCRIPTOR,
-            settings.poll_ms,
-            HidClassSettings::default(),
-        );
-
-        let usb_dev =
-            UsbDeviceBuilder::new(allocator, UsbVidPid(settings.vid_pid.0, settings.vid_pid.1))
-                .usb_rev(UsbRev::Usb200)
-                .strings(settings.string_descriptors)
-                .unwrap()
-                .build();
-
         Self {
-            usb_dev,
             ep,
-            debug_ep,
-            logger,
             kb: MutableReport::new(ReportHidKeyboardInReport::new()),
             cc: MutableReport::new(ReportHidConsumerControlInReport::new()),
             leds: BootLeds::empty(),
@@ -360,44 +314,40 @@ impl<'a, B: UsbBus, const DBG_SIZE: usize> ReportHidKeyboard<'a, B, DBG_SIZE> {
         }
     }
 
-    fn do_rx(&mut self) -> Result<bool, KeyboardPollError> {
-        if self.usb_dev.poll(&mut [&mut self.ep, &mut self.debug_ep]) {
-            let mut buf: [u8; USB_HID_READ_LEN] = [0u8; USB_HID_READ_LEN];
-            let report_info = match self.ep.pull_raw_report(&mut buf) {
-                Ok(r) => r,
-                Err(UsbError::WouldBlock) => return Ok(false),
-                Err(e) => {
-                    return Err(e.into());
-                }
-            };
-
-            dev_debug!("Received OUT report with ID: {}", report_info.report_id);
-            dev_trace!("OUT report dump: {:x?}", buf);
-
-            match report_info.report_id {
-                ReportHidKeyboardReportId::N => {
-                    // I'm not gonna even bother to create a struct to read a single byte, at least for now.
-                    if report_info.len < 2 {
-                        dev_error!("Received not enough bytes for OUT Report");
-                        return Err(KeyboardPollError::MalformedOutReport);
-                    }
-                    self.leds = BootLeds::from_bits_retain(buf[1]);
-                    dev_debug!("Turned on LEDs: {:?}", self.leds);
-                }
-                report_id => {
-                    return Err(KeyboardPollError::UnknownReport(report_id));
-                }
+    fn do_rx(&mut self) -> Result<(), KeyboardTickError> {
+        let mut buf: [u8; USB_HID_READ_LEN] = [0u8; USB_HID_READ_LEN];
+        let report_info = match self.ep.pull_raw_report(&mut buf) {
+            Ok(r) => r,
+            Err(UsbError::WouldBlock) => return Ok(()),
+            Err(e) => {
+                return Err(e.into());
             }
-            Ok(true)
-        } else {
-            Ok(false)
+        };
+
+        dev_debug!("Received OUT report with ID: {}", report_info.report_id);
+        dev_trace!("OUT report dump: {:x?}", buf);
+
+        match report_info.report_id {
+            ReportHidKeyboardReportId::N => {
+                // I'm not gonna even bother to create a struct to read a single byte, at least for now.
+                if report_info.len < 2 {
+                    dev_error!("Received not enough bytes for OUT Report");
+                    return Err(KeyboardTickError::MalformedOutReport);
+                }
+                self.leds = BootLeds::from_bits_retain(buf[1]);
+                dev_debug!("Turned on LEDs: {:?}", self.leds);
+                Ok(())
+            }
+            report_id => {
+                return Err(KeyboardTickError::UnknownReport(report_id));
+            }
         }
     }
 
     fn do_tx_report<R: IntoBytes + Immutable>(
         ep: &mut HIDClass<'a, B>,
         report: &mut MutableReport<R>,
-    ) -> Result<(), KeyboardPollError> {
+    ) -> Result<(), KeyboardTickError> {
         if report.is_dirty() {
             match ep.push_raw_input(&report.report.as_bytes()) {
                 Ok(_) => {
@@ -413,7 +363,7 @@ impl<'a, B: UsbBus, const DBG_SIZE: usize> ReportHidKeyboard<'a, B, DBG_SIZE> {
     }
 }
 
-impl<'a, B: UsbBus, const DBG_SIZE: usize> HidKeyboard for ReportHidKeyboard<'a, B, DBG_SIZE> {
+impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
     fn press_key(&mut self, key: KeyboardUsage) -> Result<(), HidKeyboardPressError> {
         Self::ensure_keyboard_usage_within_bounds(key).ok_or(HidKeyboardPressError::Unsupported)?;
 
@@ -488,38 +438,31 @@ impl<'a, B: UsbBus, const DBG_SIZE: usize> HidKeyboard for ReportHidKeyboard<'a,
         }
     }
 
-    fn poll(&mut self) -> Result<bool, KeyboardPollError> {
-        Self::do_tx_report(&mut self.ep, &mut self.kb)?;
-        Self::do_tx_report(&mut self.ep, &mut self.cc)?;
-        let r = self.do_rx()?;
-
-        let mut debug_buf: [u8; 64] = [0u8; 64];
-        let count = self.logger.read_pending_bytes(&mut debug_buf);
-        if count > 0 {
-            let r = self.debug_ep.push_raw_input(&debug_buf[0..count]);
-            if let Ok(_) = r {
-                self.logger.drop_pending_bytes(count);
-            }
-        }
-
-        if let Ok(info) = self.debug_ep.pull_raw_report(&mut debug_buf) {
-            if &debug_buf[0..info.len] == b"enter-dfu" || &debug_buf[0..info.len] == b"enter-dfu\n" {
-                dev_info!("Requested entering into DFU mode...");
-                BootloaderUtil::enter_bootloader();
-            } else {
-                dev_warn!("Ignored unknown debug request: {:02x?}", &debug_buf[0..info.len]);
-            }
-        }
-
-        Ok(r)
-    }
-
     fn leds(&self) -> &BootLeds {
         &self.leds
     }
 
     fn dirty(&self) -> bool {
         self.kb.is_dirty() || self.cc.is_dirty()
+    }
+
+    fn tick(&mut self) -> Result<(), KeyboardTickError> {
+        Self::do_tx_report(&mut self.ep, &mut self.kb)?;
+        Self::do_tx_report(&mut self.ep, &mut self.cc)?;
+        self.do_rx()
+    }
+}
+
+impl<'a, B: UsbBus> UsbFeature<B> for ReportHidKeyboard<'a, B> {
+    const EP: usize = 1;
+    type TPoll = ();
+
+    fn endpoints_mut(&mut self) -> [&mut dyn usb_device::class::UsbClass<B>; 1] {
+        [&mut self.ep]
+    }
+
+    fn poll(&mut self) -> Self::TPoll {
+        // Do nothing. The keyboard must call tick() in order to do the work.
     }
 }
 

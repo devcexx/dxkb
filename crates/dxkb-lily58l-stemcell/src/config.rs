@@ -79,7 +79,7 @@ pub type TKeyboard<'b> = SplitKeyboard<
     SIDE_ROWS,
     SIDE_COLS,
     CurrentSide,
-    ReportHidKeyboard<'b, UsbBus<USB>, 1024>,
+    ReportHidKeyboard<'b, UsbBus<USB>>,
     KeyboardLayoutConfig,
     CustomKey,
     TKeyMatrix,
