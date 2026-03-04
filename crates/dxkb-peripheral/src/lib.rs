@@ -12,6 +12,7 @@ pub mod key_matrix;
 pub mod uart_dma_rb;
 pub mod usart;
 pub mod dma;
+pub mod usb;
 
 pub trait InterruptReceiver {
     const INTERRUPT: Interrupt;

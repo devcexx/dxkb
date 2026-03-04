@@ -79,6 +79,7 @@ pub type TKeyboard<'b> = SplitKeyboard<
     LAYOUT_COLS,
     SIDE_ROWS,
     SIDE_COLS,
+    DWTClock,
     CurrentSide,
     ReportHidKeyboard<'b, UsbBus<USB>>,
     KeyboardLayoutConfig,

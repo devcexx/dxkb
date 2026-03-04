@@ -22,7 +22,7 @@ mod layout;
 use config::*;
 
 use cortex_m::interrupt::free;
-use dxkb_common::{dev_info, dev_trace, util::RingBuffer};
+use dxkb_common::{dev_info, util::RingBuffer};
 use dxkb_core::{debug::DebugHidFeature, do_on_key_state, hid::HidKeyboard, keyboard::{HandleKey, KeyboardUsage, PinMasterSense}, log::RingBufferLogger};
 use core::any::type_name;
 use core::mem::MaybeUninit;
@@ -32,7 +32,6 @@ use dxkb_core::usb::UsbFeatureSet;
 use dxkb_core::keyboard::SplitKeyboardLike;
 
 use dxkb_peripheral::{clock::DWTClock, uart_dma_rb::HalfDuplexInitializer, BootloaderUtil, InterruptReceiver};
-use dxkb_peripheral::key_matrix::IntoInputPinsWithSamePort;
 
 #[allow(unused_imports)]
 use panic_itm as _;
@@ -40,7 +39,7 @@ use panic_itm as _;
 use cortex_m_rt::entry;
 use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, UartDmaRb};
 use dxkb_split_link::SplitBus;
-use stm32f4xx_hal::{pac::{EXTI, USART1}, syscfg::SysCfg};
+use stm32f4xx_hal::{pac::EXTI, syscfg::SysCfg};
 use stm32f4xx_hal::rcc::Clocks;
 use stm32f4xx_hal::{
     dma::StreamsTuple,
@@ -180,6 +179,7 @@ fn main0() -> ! {
     let mut usb_dev =
         UsbDeviceBuilder::new(usb_alloc, UsbVidPid(0x16c0, 0x27db))
             .usb_rev(UsbRev::Usb200)
+            .supports_remote_wakeup(true)
             .strings(&[StringDescriptors::new(LangID::ES)
                 .serial_number("0")
                 .manufacturer("devcexx")
@@ -216,10 +216,11 @@ fn main0() -> ! {
         &clocks,
     );
 
-    let split_bus = init_split_bus(dp.USART2, dp.DMA1, gpioa.pa2, clock, &clocks, &mut dp.SYSCFG.constrain(), &mut dp.EXTI);
+    let split_bus = init_split_bus(dp.USART2, dp.DMA1, gpioa.pa2, clock.clone(), &clocks, &mut dp.SYSCFG.constrain(), &mut dp.EXTI);
     let master_tester = PinMasterSense::new(gpioa.pa9.into_pull_down_input());
     unsafe {
         KEYBOARD.write(TKeyboard::new(
+            clock,
             usb_feature_kb,
             layout::LAYOUT,
             matrix,
@@ -257,7 +258,7 @@ fn main0() -> ! {
             }
         }
         (kb.hid_mut(), &mut usb_feature_debug).poll_all(&mut usb_dev);
-        kb.poll(&mut kb_context);
+        kb.poll(&mut kb_context, &mut usb_dev);
     }
 }
 

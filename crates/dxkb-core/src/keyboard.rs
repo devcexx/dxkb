@@ -1,10 +1,9 @@
 use core::marker::PhantomData;
 
 use dxkb_common::{
-    KeyState, dev_error, dev_info, dev_trace, dev_warn,
-    util::{BitMatrix, BitMatrixLayout, BoundedU8, ColBitMatrixLayout, ConstCond, IsTrue},
+    dev_error, dev_info, dev_trace, dev_warn, time::Clock, util::{BitMatrix, BitMatrixLayout, BoundedU8, ColBitMatrixLayout, ConstCond, IsTrue}, KeyState
 };
-use dxkb_peripheral::key_matrix::KeyMatrixLike;
+use dxkb_peripheral::{key_matrix::KeyMatrixLike, usb::UsbRemoteWakeup};
 use dxkb_split_link::SplitBusLike;
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
@@ -12,8 +11,8 @@ use stm32f4xx_hal::{
     gpio::{PinPull, Pull},
     hal::digital::InputPin,
 };
-use usbd_hid::descriptor::KeyboardReport;
 
+use usb_device::{bus::UsbBus, device::{UsbDevice, UsbDeviceState}};
 // Re-export it to be used for macros without needing to reference the usbd-hid crate.
 pub use usbd_hid::descriptor::KeyboardUsage;
 
@@ -120,6 +119,7 @@ pub struct SplitKeyboard<
     const LCOLS: u8,
     const MROWS: u8,
     const MCOLS: u8,
+    Clk: Clock,
     Side: SplitKeyboardSideType,
     Hid: HidKeyboard,
     LayoutConfig: SplitLayoutConfig,
@@ -135,6 +135,7 @@ pub struct SplitKeyboard<
     [(); LROWS as usize]:,
     ConstCond<{ LLAYERS > 0 }>: IsTrue,
 {
+    clock: Clk,
     matrix: Matrix,
     layout: SplitKeyboardLayout<LayoutConfig, Key, LLAYERS, LROWS, LCOLS>,
     state: KeyboardState<Key, LLAYERS, LROWS, LCOLS>,
@@ -143,6 +144,7 @@ pub struct SplitKeyboard<
     is_master: bool,
 
     hid: Hid,
+    remote_wakeup_signal_start_time: Option<Clk::TInstant>,
 
     _side: PhantomData<Side>,
     _layout_config: PhantomData<LayoutConfig>,
@@ -155,6 +157,7 @@ impl<
     const LCOLS: u8,
     const MROWS: u8,
     const MCOLS: u8,
+    Clk: Clock,
     CurSide,
     Hid,
     LayoutConfig,
@@ -170,6 +173,7 @@ impl<
         LCOLS,
         MROWS,
         MCOLS,
+        Clk,
         CurSide,
         Hid,
         LayoutConfig,
@@ -180,6 +184,7 @@ impl<
         User,
     >
 where
+    Clk: Clock,
     CurSide: SideLayoutOffset<LayoutConfig>,
     CurSide::Opposite: SideLayoutOffset<LayoutConfig>,
     Hid: HidKeyboard,
@@ -206,6 +211,7 @@ where
     }
 
     pub fn new(
+        clock: Clk,
         hid: Hid,
         layout: SplitKeyboardLayout<LayoutConfig, Key, LLAYERS, LROWS, LCOLS>,
         matrix: Matrix,
@@ -214,7 +220,9 @@ where
     ) -> Self {
         const { Self::assert_config_ok() }
         Self {
+            clock,
             hid,
+            remote_wakeup_signal_start_time: None,
             matrix,
             layout,
             state: KeyboardState::new(),
@@ -254,7 +262,7 @@ where
         }
     }
 
-    fn poll_master(&mut self, user: &mut User) {
+    fn poll_master<'a, B: UsbBus>(&mut self, user: &mut User, device: &mut UsbDevice<'a, B>) {
         let matrix_changed = self.matrix.scan_matrix();
         if matrix_changed {
             // TODO There has to be a better way to implement
@@ -294,6 +302,21 @@ where
                         user,
                     );
                 }
+            }
+        }
+
+        if device.remote_wakeup_enabled() && device.state() == UsbDeviceState::Suspend && self.hid.total_pressed_keys() > 0 && self.remote_wakeup_signal_start_time.is_none() {
+            dev_info!("Enabling wakeup signal");
+            self.remote_wakeup_signal_start_time = Some(self.clock.current_instant());
+            self.hid.unpress_all_keys();
+            device.remote_wakeup_start();
+        }
+
+        if let Some(wake_up_start) = self.remote_wakeup_signal_start_time {
+            if self.clock.elapsed_since(wake_up_start).as_millis() > 1 {
+                dev_info!("Disabling wakeup signal");
+                device.remote_wakeup_end();
+                self.remote_wakeup_signal_start_time = None;
             }
         }
 
@@ -343,97 +366,14 @@ where
         }
     }
 
-    pub fn poll(&mut self, user: &mut User) {
+    pub fn poll<'a, B: UsbBus>(&mut self, user: &mut User, device: &mut UsbDevice<'a, B>) {
         self.check_master();
 
         if self.is_master {
-            self.poll_master(user);
+            self.poll_master(user, device);
         } else {
             self.poll_slave();
         }
-    }
-}
-
-const ROLLED_OVER_KEYBOARD_REPORT: KeyboardReport = KeyboardReport {
-    modifier: 0,
-    reserved: 0,
-    leds: 0,
-    keycodes: [KeyboardUsage::KeyboardErrorRollOver as u8; 6],
-};
-
-pub struct KeyboardReportHolder {
-    report: KeyboardReport,
-    rollover: bool,
-    dirty: bool,
-}
-
-impl KeyboardReportHolder {
-    const fn new() -> Self {
-        KeyboardReportHolder {
-            report: KeyboardReport {
-                modifier: 0,
-                reserved: 0,
-                leds: 0,
-                keycodes: [0u8; 6],
-            },
-            rollover: false,
-            dirty: false,
-        }
-    }
-
-    pub fn rolled_over(&self) -> bool {
-        self.rollover
-    }
-
-    pub fn report(&self) -> &KeyboardReport {
-        if self.rollover {
-            &ROLLED_OVER_KEYBOARD_REPORT
-        } else {
-            &self.report
-        }
-    }
-
-    pub fn is_dirty(&self) -> bool {
-        return self.dirty;
-    }
-
-    pub fn clear_dirty(&mut self) {
-        self.dirty = false;
-    }
-
-    pub fn add_key(&mut self, key: KeyboardUsage) {
-        if self.rollover {
-            return;
-        }
-
-        if self.report.keycodes.contains(&(key as u8)) {
-            return;
-        }
-
-        if let Some(free_slot) = self.report.keycodes.iter().position(|e| *e == 0) {
-            self.report.keycodes[free_slot] = key as u8;
-            self.dirty = true;
-            return;
-        }
-
-        self.rollover = true;
-        self.dirty = true;
-    }
-
-    pub fn rm_key(&mut self, key: KeyboardUsage) {
-        if self.rollover {
-            return;
-        }
-
-        if let Some(occ) = self.report.keycodes.iter().position(|e| *e == key as u8) {
-            self.report.keycodes[occ] = 0;
-            self.dirty = true;
-        }
-    }
-
-    pub fn reset_keycodes(&mut self) {
-        self.report.keycodes.fill(0);
-        self.rollover = false;
     }
 }
 
@@ -443,6 +383,7 @@ impl<
     const LCOLS: u8,
     const MROWS: u8,
     const MCOLS: u8,
+    Clk,
     CurSide,
     Hid,
     LayoutConfig,
@@ -458,6 +399,7 @@ impl<
         LCOLS,
         MROWS,
         MCOLS,
+        Clk,
         CurSide,
         Hid,
         LayoutConfig,
@@ -468,6 +410,7 @@ impl<
         User,
     >
 where
+    Clk: Clock,
     CurSide: SideLayoutOffset<LayoutConfig>,
     CurSide::Opposite: SideLayoutOffset<LayoutConfig>,
     Hid: HidKeyboard,

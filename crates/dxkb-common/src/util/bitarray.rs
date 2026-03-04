@@ -26,6 +26,15 @@ where
     buf: [u8; bit_array_size(N)],
 }
 
+impl <const N: usize> Default for BitArray<N>
+where
+    [(); bit_array_size(N)]:,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const N: usize> BitArray<N>
 where
     [(); bit_array_size(N)]:,

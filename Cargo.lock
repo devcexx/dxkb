@@ -477,6 +477,7 @@ dependencies = [
  "ringbuffer",
  "seq-macro",
  "stm32f4xx-hal",
+ "usb-device",
  "vcell",
 ]
 

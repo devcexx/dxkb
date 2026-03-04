@@ -1,11 +1,12 @@
 use bitflags::bitflags;
 use dxkb_common::{
-    dev_debug, dev_error, dev_trace, util::{BitArray, ConstU8, ConstU8Like}
+    dev_debug, dev_error, dev_info, dev_trace, time::Clock, util::{BitArray, ConstU8, ConstU8Like}
 };
 use hut::Consumer;
+use stm32f4xx_hal::pac::OTG_FS_DEVICE;
 use usb_device::{
     bus::{UsbBus, UsbBusAllocator},
-    device::{StringDescriptors, UsbVidPid},
+    device::{StringDescriptors, UsbDevice, UsbDeviceState, UsbVidPid},
 };
 use usbd_hid::{
     UsbError,
@@ -96,6 +97,9 @@ pub trait HidKeyboard {
     fn tick(&mut self) -> Result<(), KeyboardTickError>;
     fn leds(&self) -> &BootLeds;
     fn dirty(&self) -> bool;
+
+    fn unpress_all_keys(&mut self);
+    fn total_pressed_keys(&self) -> usize;
 }
 
 // The linux kernel recognizes ~ 624 consumer control keys. (ref:
@@ -182,7 +186,7 @@ const REPORT_HID_KEYBOARD_DESCRIPTOR: [u8; 76] =[
     0xc0,                                                   // End Collection
 ];
 
-#[derive(IntoBytes, Immutable)]
+#[derive(IntoBytes, Immutable, Default)]
 #[repr(packed)]
 struct ReportHidKeyboardInReport {
     report_id: ReportHidKeyboardReportId,
@@ -202,7 +206,7 @@ impl ReportHidKeyboardInReport {
     }
 }
 
-#[derive(IntoBytes, Immutable)]
+#[derive(IntoBytes, Immutable, Default)]
 #[repr(C, packed(2))]
 struct ReportHidConsumerControlInReport {
     report_id: ReportHidConsumerControlReportId,
@@ -258,6 +262,13 @@ impl<R> MutableReport<R> {
     fn clear_dirty(&mut self) {
         self.dirty = false;
     }
+
+    fn reset(&mut self)
+    where
+        R: Default,
+    {
+        self.report = R::default();
+    }
 }
 
 /**
@@ -266,8 +277,12 @@ impl<R> MutableReport<R> {
 pub struct ReportHidKeyboard<'a, B: UsbBus> {
     ep: HIDClass<'a, B>,
     kb: MutableReport<ReportHidKeyboardInReport>,
+    kb_pressed_count: usize,
     cc: MutableReport<ReportHidConsumerControlInReport>,
+    cc_pressed_count: usize,
     leds: BootLeds,
+    remote_wakeup_enabled: bool,
+    usb_state: UsbDeviceState
 }
 
 impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
@@ -289,8 +304,12 @@ impl<'a, B: UsbBus> ReportHidKeyboard<'a, B> {
         Self {
             ep,
             kb: MutableReport::new(ReportHidKeyboardInReport::new()),
+            kb_pressed_count: 0,
             cc: MutableReport::new(ReportHidConsumerControlInReport::new()),
+            cc_pressed_count: 0,
             leds: BootLeds::empty(),
+            remote_wakeup_enabled: false,
+            usb_state: UsbDeviceState::Suspend
         }
     }
 
@@ -373,6 +392,7 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
             .keys
             .set(key as usize - REPORT_HID_KB_USAGE_MIN as usize)
         {
+            self.kb_pressed_count += 1;
             self.kb.set_dirty();
             Ok(())
         } else {
@@ -390,6 +410,7 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
             .keys
             .clear(key as usize - REPORT_HID_KB_USAGE_MIN as usize)
         {
+            self.kb_pressed_count -= 1;
             self.kb.set_dirty();
             Ok(())
         } else {
@@ -399,7 +420,6 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
 
     fn press_consumer_control_key(&mut self, key: Consumer) -> Result<(), HidKeyboardPressError> {
         Self::ensure_cc_within_bounds(key).ok_or(HidKeyboardPressError::Unsupported)?;
-
         match lookup_or_find_empty_mut(&mut self.cc.report.pressed_buttons, &(key as u16), &0) {
             LookOrFindEmptyMutResult::Found(_) => {
                 // Already pressed
@@ -408,6 +428,7 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
             LookOrFindEmptyMutResult::Empty(empty) => {
                 // Not pressed, but an empty space found
                 *empty = key as u16;
+                self.cc_pressed_count += 1;
                 self.cc.set_dirty();
                 Ok(())
             }
@@ -428,6 +449,7 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
             LookOrFindEmptyMutResult::Found(pressed) => {
                 // Pressed, need to unpress
                 *pressed = 0;
+                self.cc_pressed_count -= 1;
                 self.cc.set_dirty();
                 Ok(())
             }
@@ -449,7 +471,27 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
     fn tick(&mut self) -> Result<(), KeyboardTickError> {
         Self::do_tx_report(&mut self.ep, &mut self.kb)?;
         Self::do_tx_report(&mut self.ep, &mut self.cc)?;
-        self.do_rx()
+        let ret = self.do_rx()?;
+
+        Ok(ret)
+    }
+
+    fn unpress_all_keys(&mut self) {
+        if self.kb_pressed_count > 0 {
+            self.kb.reset();
+            self.kb_pressed_count = 0;
+            self.kb.set_dirty();
+        }
+
+        if self.cc_pressed_count > 0 {
+            self.cc.reset();
+            self.cc_pressed_count = 0;
+            self.cc.set_dirty();
+        }
+    }
+
+    fn total_pressed_keys(&self) -> usize {
+        self.kb_pressed_count + self.cc_pressed_count
     }
 }
 
@@ -461,8 +503,12 @@ impl<'a, B: UsbBus> UsbFeature<B> for ReportHidKeyboard<'a, B> {
         [&mut self.ep]
     }
 
-    fn poll(&mut self) -> Self::TPoll {
-        // Do nothing. The keyboard must call tick() in order to do the work.
+    fn usb_poll(&mut self, device: &mut UsbDevice<B>) -> Self::TPoll {
+        if self.remote_wakeup_enabled != device.remote_wakeup_enabled() {
+            dev_debug!("Remote wakeup state change: {}", device.remote_wakeup_enabled());
+        }
+        self.remote_wakeup_enabled = device.remote_wakeup_enabled();
+        self.usb_state = device.state();
     }
 }
 

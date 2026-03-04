@@ -1,6 +1,6 @@
 use dxkb_common::{dev_info, dev_warn};
 use dxkb_peripheral::BootloaderUtil;
-use usb_device::bus::{UsbBus, UsbBusAllocator};
+use usb_device::{bus::{UsbBus, UsbBusAllocator}, device::UsbDevice};
 use usbd_hid::hid_class::{HIDClass, HidClassSettings};
 
 use crate::{log::RingBufferLogger, usb::UsbFeature};
@@ -75,7 +75,7 @@ impl<'a, B: UsbBus, O: DebugRead> UsbFeature<B> for DebugHidFeature<'a, B, O> {
         [&mut self.hid]
     }
 
-    fn poll(&mut self) -> Self::TPoll {
+    fn usb_poll(&mut self, _device: &mut UsbDevice<B>) -> Self::TPoll {
         if self.enter_bootloader {
             BootloaderUtil::enter_bootloader();
         }

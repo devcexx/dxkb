@@ -138,6 +138,7 @@ type KeyboardT<Hid> = SplitKeyboard<
     LAYOUT_COLS,
     SIDE_ROWS,
     SIDE_COLS,
+    DWTClock,
     CurrentSide,
     Hid,
     KeyboardLayoutConfig,
@@ -295,6 +296,7 @@ fn main0() -> ! {
     let mut usb_dev =
         UsbDeviceBuilder::new(usb_alloc, UsbVidPid(0x16c0, 0x27db))
             .usb_rev(UsbRev::Usb200)
+            .supports_remote_wakeup(true)
             .strings(&[StringDescriptors::new(LangID::ES)
                 .serial_number("0")
                 .manufacturer("devcexx")
@@ -318,10 +320,11 @@ fn main0() -> ! {
         &clocks,
     );
 
-    let mut split_bus = init_split_bus(dp.USART1, dp.DMA2, gpiob.pb6, gpiob.pb7, clock, &clocks);
+    let mut split_bus = init_split_bus(dp.USART1, dp.DMA2, gpiob.pb6, gpiob.pb7, clock.clone(), &clocks);
     let master_tester = make_usb_master_checker(gpioa.pa9.into_input());
     unsafe {
         KEYBOARD.write(KeyboardT::new(
+            clock.clone(),
             usb_feature_kb,
             build_keyboard_layout(),
             matrix,
@@ -358,7 +361,7 @@ fn main0() -> ! {
         }
 
         (kb.hid_mut(), &mut usb_feature_debug).poll_all(&mut usb_dev);
-        kb.poll(&mut key_context);
+        kb.poll(&mut key_context, &mut usb_dev);
     }
 }
 

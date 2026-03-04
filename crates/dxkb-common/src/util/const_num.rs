@@ -14,8 +14,15 @@ macro_rules! const_num_impl {
             const I: Self = $tname(N);
             const N: $ntype = N;
         }
+
+        impl<const N: $ntype> Default for $tname<N> {
+            fn default() -> Self {
+                Self::I
+            }
+        }
     };
 }
+
 
 const_num_impl!(ConstU8, ConstU8Like, u8);
 const_num_impl!(ConstU16, ConstU16Like, u16);
