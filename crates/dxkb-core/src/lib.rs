@@ -1,9 +1,7 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
-#![feature(concat_idents)]
 #![feature(maybe_uninit_uninit_array_transpose)]
-#![feature(maybe_uninit_slice)]
 #![feature(macro_metavar_expr)]
 #![no_std]
 

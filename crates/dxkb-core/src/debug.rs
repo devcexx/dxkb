@@ -1,4 +1,4 @@
-use dxkb_common::{dev_info, dev_warn};
+use dxkb_common::{dev_info, dev_warn, util};
 use dxkb_peripheral::BootloaderUtil;
 use usb_device::{bus::{UsbBus, UsbBusAllocator}, device::UsbDevice};
 use usbd_hid::hid_class::{HIDClass, HidClassSettings};
@@ -67,12 +67,14 @@ impl <'a, B: UsbBus, O: DebugRead> DebugHidFeature<'a, B, O> {
     }
 }
 
-impl<'a, B: UsbBus, O: DebugRead> UsbFeature<B> for DebugHidFeature<'a, B, O> {
+impl<'a, B: UsbBus + 'a, O: DebugRead> UsbFeature<B> for DebugHidFeature<'a, B, O> {
     const EP: usize = 1;
     type TPoll = ();
 
-    fn endpoints_mut(&mut self) -> [&mut dyn usb_device::class::UsbClass<B>; 1] {
-        [&mut self.hid]
+    fn endpoints_mut(&mut self) -> [&mut dyn usb_device::class::UsbClass<B>; Self::EP] {
+        util::slice::array_unify_length(
+          [&mut self.hid]
+        )
     }
 
     fn usb_poll(&mut self, _device: &mut UsbDevice<B>) -> Self::TPoll {

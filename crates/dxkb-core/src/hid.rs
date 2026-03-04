@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use dxkb_common::{
-    dev_debug, dev_error, dev_info, dev_trace, time::Clock, util::{BitArray, ConstU8, ConstU8Like}
+    dev_debug, dev_error, dev_info, dev_trace, time::Clock, util::{self, BitArray, ConstU8, ConstU8Like}
 };
 use hut::Consumer;
 use stm32f4xx_hal::pac::OTG_FS_DEVICE;
@@ -495,12 +495,14 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
     }
 }
 
-impl<'a, B: UsbBus> UsbFeature<B> for ReportHidKeyboard<'a, B> {
+impl<'a, B: UsbBus + 'a> UsbFeature<B> for ReportHidKeyboard<'a, B> {
     const EP: usize = 1;
     type TPoll = ();
 
-    fn endpoints_mut(&mut self) -> [&mut dyn usb_device::class::UsbClass<B>; 1] {
-        [&mut self.ep]
+    fn endpoints_mut(&mut self) -> [&mut dyn usb_device::class::UsbClass<B>; Self::EP] {
+        util::slice::array_unify_length(
+          [&mut self.ep]
+        )
     }
 
     fn usb_poll(&mut self, device: &mut UsbDevice<B>) -> Self::TPoll {
