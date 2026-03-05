@@ -80,10 +80,10 @@ pub struct DefaultSplitLinkTimings {}
 
 // TODO The default timings are so big for now, they need to be reduced.
 impl SplitLinkTimings for DefaultSplitLinkTimings {
-    const MAX_LINK_IDLE_TIME: Duration = Duration::from_millis(999999);
+    const MAX_LINK_IDLE_TIME: Duration = Duration::from_millis(1000);
     const LINK_IDLE_PROBE_INTERVAL_TIME: Duration = Duration::from_millis(100);
-    const MAX_SYNC_ACK_WAIT_TIME: Duration = Duration::from_millis(1000);
-    const MSG_REPLAY_DELAY_TIME: Duration = Duration::from_millis(500);
+    const MAX_SYNC_ACK_WAIT_TIME: Duration = Duration::from_millis(100);
+    const MSG_REPLAY_DELAY_TIME: Duration = Duration::from_millis(100);
 }
 
 pub struct TestingTimings {}

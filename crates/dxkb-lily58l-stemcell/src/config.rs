@@ -1,6 +1,6 @@
 use dxkb_core::{hid::ReportHidKeyboard, keyboard::{Left, Right, PinMasterSense, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig}, keys::DefaultKey};
 use dxkb_peripheral::{clock::DWTClock, key_matrix::{DebouncerEagerPerKey, KeyMatrix, OversamplingRead, PinsWithSamePort, RowScan, SingleShotRead}, uart_dma_rb::{HalfDuplex, UartDmaRb}};
-use dxkb_split_link::{SplitBus, TestingTimings};
+use dxkb_split_link::{DefaultSplitLinkTimings, SplitBus};
 use stm32f4xx_hal::{dma::{Stream5, Stream6, Stream7}, gpio::{Input, Output, Pin, PushPull}, otg_fs::USB, pac::{DMA1, DMA2, USART1, USART2}, signature::Uid};
 use synopsys_usb_otg::UsbBus;
 
@@ -58,7 +58,7 @@ pub type SplitBusTxDmaStream = Stream6<SplitBusDmaPeripheral>;
 pub type SplitBusRxDmaStream = Stream5<SplitBusDmaPeripheral>;
 
 pub type SplitBusUsart = UartDmaRb<HalfDuplex<SplitBusUsartPort, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4>, 256, 256, 128>;
-pub type TSplitBus = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUsart, DWTClock, 32>;
+pub type TSplitBus = SplitBus<SplitKeyboardLinkMessage, DefaultSplitLinkTimings, SplitBusUsart, DWTClock, 32>;
 
 pub type TKeyMatrixDebounce = DebouncerEagerPerKey<SIDE_ROWS, SIDE_COLS, DEBOUNCE_MILLIS>;
 pub type TKeyMatrix = KeyMatrix<
