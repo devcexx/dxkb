@@ -176,6 +176,12 @@ fn main0() -> ! {
         1
     );
 
+    #[cfg(feature = "side-left")]
+    let product = "STeMCell Lily58L (Left Side)";
+
+    #[cfg(feature = "side-right")]
+    let product = "STeMCell Lily58L (Right Side)";
+
     let mut usb_dev =
         UsbDeviceBuilder::new(usb_alloc, UsbVidPid(0x16c0, 0x27db))
             .usb_rev(UsbRev::Usb200)
@@ -183,7 +189,7 @@ fn main0() -> ! {
             .strings(&[StringDescriptors::new(LangID::ES)
                 .serial_number("0")
                 .manufacturer("devcexx")
-                .product("STeMCell Lily58L")])
+                .product(product)])
             .unwrap()
             .build();
 

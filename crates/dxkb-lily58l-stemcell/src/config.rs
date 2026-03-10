@@ -5,7 +5,7 @@ use stm32f4xx_hal::{dma::{Stream5, Stream6, Stream7}, gpio::{Input, Output, Pin,
 use synopsys_usb_otg::UsbBus;
 
 // The total layers of the layout.
-const LAYERS: u8 = 3;
+const LAYERS: u8 = 4;
 
 // The dimensions of each side of the keyboard.
 const SIDE_ROWS: u8 = 5;
@@ -109,7 +109,7 @@ pub type CurrentSide = Left;
 compile_error!("Only side-left or side-right features must be enabled at a time!");
 
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum CustomKey {
     Default(DefaultKey),
     /// When pressed, presses both the LShift and the = key, so the plus symbol can be sent without any other keystroke.
@@ -123,10 +123,10 @@ macro_rules! custom_key_from_alias {
     };
 
     (u:LEx) => {
-        $crate::CustomKey::Default(dxkb_core::default_key_from_alias!(f:PshLyrT(1)))
+        $crate::CustomKey::Default(dxkb_core::default_key_from_alias!(f:LTRelSet(+1)))
     };
     (u:LFn) => {
-        $crate::CustomKey::Default(dxkb_core::default_key_from_alias!(f:PshLyrT(2)))
+        $crate::CustomKey::Default(dxkb_core::default_key_from_alias!(f:LTRelSet(+2)))
     };
 
     ($($other:tt)*) => {

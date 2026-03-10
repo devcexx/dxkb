@@ -10,7 +10,7 @@ use super::{ConstCond, IsTrue};
 pub struct BoundedIndex<const LENGTH: usize>(usize);
 
 #[repr(transparent)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BoundedU8<const LENGTH: u8>(u8);
 
 impl<const LENGTH: u8> Display for BoundedU8<LENGTH> {

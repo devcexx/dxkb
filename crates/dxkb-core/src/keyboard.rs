@@ -262,6 +262,48 @@ where
         }
     }
 
+    fn sync_layers(&mut self, user: &mut User) {
+        // If the requested layer differs from the current layer, means that the
+        // user has requested a layer change in the last scan. To perform a
+        // correct transition between layers, we locate the pressed keys and we
+        // simulate a release, simulating a press in the new key in the new
+        // layer, so that we can ensure that the number of pressed events
+        // received by the keys matches the number of release events. This is
+        // skipped if the old and the new key are the same.
+        let mut pending_pressed = self.state.pressed_key_count;
+        if self.state.requested_layer != self.state.current_layer {
+            for row in 0..LROWS {
+                for col in 0..LCOLS {
+                    if pending_pressed == 0 {
+                        break;
+                    }
+
+                    if self.state.get_real_key_state(row, col) == KeyState::Pressed {
+                        pending_pressed -= 1;
+
+                        let old_key = self.layout.get_key_definition(self.state.current_layer, row, col);
+                        let new_key = self.layout.get_key_definition(self.state.requested_layer, row, col);
+
+                        if old_key != new_key {
+                            let new_key = new_key.clone();
+                            let old_key = old_key.clone();
+
+                            old_key.handle_key_state_change::<_, Self>(self, user, KeyState::Released);
+                            new_key.handle_key_state_change::<_, Self>(self, user, KeyState::Pressed);
+                        }
+                    }
+                }
+            }
+
+            dev_info!(
+                "Layer change completed: {} -> {}",
+                self.state.current_layer.value(),
+                self.state.requested_layer.value()
+            );
+            self.state.current_layer = self.state.requested_layer;
+        }
+    }
+
     fn poll_master<'a, B: UsbBus>(&mut self, user: &mut User, device: &mut UsbDevice<'a, B>) {
         let matrix_changed = self.matrix.scan_matrix();
         if matrix_changed {
@@ -304,6 +346,8 @@ where
                 }
             }
         }
+
+        self.sync_layers(user);
 
         if device.remote_wakeup_enabled() && device.state() == UsbDeviceState::Suspend && self.hid.total_pressed_keys() > 0 && self.remote_wakeup_signal_start_time.is_none() {
             dev_info!("Enabling wakeup signal");
@@ -509,13 +553,11 @@ where
 }
 
 /// Represents a type that can handle changes in the keyboard key states.
-pub trait HandleKey: Sized + Clone {
+pub trait HandleKey: Sized + Clone + PartialEq + Eq {
     type User;
 
     /// Called when a key changes its state in the matrix. This function should
-    /// run any action or mutation over the keyboard state. This function MUST
-    /// NOT update the keyboard HID report. For that, use
-    /// [`update_keyboard_report`].
+    /// run any action or mutation over the keyboard state.
     fn handle_key_state_change<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
         &self,
         kb: &mut Kb,
@@ -529,25 +571,39 @@ pub trait HandleKey: Sized + Clone {
 }
 
 pub trait KeyboardStateLike {
-    /// Pushes the current active onto the stack, and makes the given layer active.
-    /// If the given new layer is out of bounds, the function returns None. Otherwise,
-    /// it returns the previous active layer.
+    /// Pushes the current active onto the stack, and requests the given index
+    /// to become the new active layer. If the given new layer is out of bounds,
+    /// the function returns None. Otherwise, it returns the previous active
+    /// layer. Note that the requested layer won't become the active one until
+    /// the keyboard confirms the change.
     fn push_layer_raw(&mut self, new_layer: u8) -> Option<u8>;
 
     /// Pops out the latest layer out of the stack and makes it the new active
     /// layer. If the stack is empty, None is returned, and no change is done to
     /// the current layer. Otherwise, the current layer is changed and the
-    /// previous active layer index is returned.
+    /// previous active layer index is returned. Note that the requested layer
+    /// won't become the active one until the keyboard confirms the change.
     fn pop_layer_raw(&mut self) -> Option<u8>;
 
     /// Pushes the current active layer onto the stack, and makes the next one
     /// the active layer. If the current active layer is the last one, the
     /// function returns false, and no change is done to the current layer.
-    /// Otherwise, it returns true.
+    /// Otherwise, it returns true. Note that the requested layer won't become
+    /// the active one until the keyboard confirms the change.
     fn push_next_layer(&mut self) -> bool;
+
+    /// Requests the given index to become the new current layer. This function
+    /// directly requests the change of the current layer without pushing
+    /// anything onto the layer stack. Returns false if the given layer is out
+    /// of bounds, Note that the requested layer won't become the active one
+    /// until the keyboard confirms the change.
+    fn request_layer_raw(&mut self, layer: u8) -> bool;
 
     /// Gets the current active layer index.
     fn current_layer_raw(&self) -> u8;
+
+    /// Gets the current requested layer index.
+    fn requested_layer_raw(&self) -> u8;
 }
 
 pub struct KeyboardState<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8>
@@ -569,11 +625,20 @@ where
     // matrix for now.
     /// The matrix holding the states of each key. This matrix holds not only
     /// the local pressed keys, like the key matrix controller, but also the
-    /// states of the remote peer side.
+    /// states of the remote peer side, when working as master.
     matrix_state: BitMatrix<{ ROWS as usize }, COLS>,
 
     /// The current layer selected, that will receive the keyboard events
     current_layer: BoundedU8<LAYERS>,
+
+    /// The requested layer to become the current one. Keys should request a new
+    /// layer by updating this value. Then, it is responsability of the keyboard
+    /// to make this layer the effective one once the current key scan has
+    /// finished, and perform any synchronization task to make a proper
+    /// transition between both layers. When the value of [`requested_layer`],
+    /// matches [`current_layer`], it means that no layer change has been
+    /// requested.
+    requested_layer: BoundedU8<LAYERS>,
 
     /// The number of logical keys pressed right now.
     pressed_key_count: u8,
@@ -594,9 +659,19 @@ where
             layers_stack: Vec::new(),
             matrix_state: BitMatrix::<{ ROWS as usize }, COLS>::new(),
             current_layer: BoundedU8::ZERO,
+            requested_layer: BoundedU8::ZERO,
             _phantom: PhantomData,
             pressed_key_count: 0,
         }
+    }
+
+    fn validate_requested_layer(layer: u8) -> Option<BoundedU8<LAYERS>> {
+        let ret = BoundedU8::from_value(layer);
+        if ret.is_none() {
+            dev_warn!("Requested layer out of bounds: {}", layer);
+        }
+
+        ret
     }
 
     #[inline(always)]
@@ -615,25 +690,32 @@ where
         changed
     }
 
-    fn set_active_layer(&mut self, layer: BoundedU8<LAYERS>) {
-        dev_info!("New active layer: {}", layer.value());
-        self.current_layer = layer;
+    fn get_real_key_state(&self, row: u8, col: u8) -> KeyState {
+        KeyState::from_bool(self.matrix_state.get_value(row as usize, col))
+    }
+
+    fn request_active_layer(&mut self, layer: BoundedU8<LAYERS>) {
+        dev_info!("New layer requested: {}", layer.value());
+        self.requested_layer = layer;
     }
 
     fn push_layer(&mut self, new_layer: BoundedU8<LAYERS>) {
+        // Always push the requested_layer into the stack. In case there are
+        // multiple requests in the same scan to push a layer, we consider all
+        // of them.
         let len = self.layers_stack.len();
-        if let Err(_) = self.layers_stack.push(self.current_layer) {
-            self.layers_stack[len - 1] = self.current_layer;
+        if let Err(_) = self.layers_stack.push(self.requested_layer) {
+            self.layers_stack[len - 1] = self.requested_layer;
         }
-        dev_info!("Pushed layer onto stack: {}", self.current_layer.value());
-        self.set_active_layer(new_layer);
+        dev_info!("Pushed layer onto stack: {}", self.requested_layer.value());
+        self.request_active_layer(new_layer);
     }
 
     fn pop_layer(&mut self) -> Option<BoundedU8<LAYERS>> {
         if let Some(head) = self.layers_stack.pop() {
-            let prev = self.current_layer;
+            let prev = self.requested_layer;
             dev_trace!("Popped layer: {}", head);
-            self.set_active_layer(head);
+            self.request_active_layer(head);
             Some(prev)
         } else {
             dev_warn!("Failed to pop layer: Layer stack was empty");
@@ -652,11 +734,11 @@ where
     ConstCond<{ LAYERS > 0 }>: IsTrue,
 {
     fn push_layer_raw(&mut self, new_layer: u8) -> Option<u8> {
-        let Some(layer_index) = BoundedU8::from_value(new_layer) else {
-            dev_warn!("Requested layer out of bounds: {}", new_layer);
-            return None; // Out of bounds
+        let Some(layer_index) = Self::validate_requested_layer(new_layer) else {
+            return None;
         };
-        let prev = self.current_layer;
+
+        let prev = self.requested_layer;
         self.push_layer(layer_index);
         Some(prev.value())
     }
@@ -666,7 +748,7 @@ where
     }
 
     fn push_next_layer(&mut self) -> bool {
-        if let Some(next) = self.current_layer.increment() {
+        if let Some(next) = self.requested_layer.increment() {
             self.push_layer(next);
             true
         } else {
@@ -675,7 +757,20 @@ where
     }
 
     fn current_layer_raw(&self) -> u8 {
-        todo!()
+        self.current_layer.value()
+    }
+
+    fn request_layer_raw(&mut self, layer: u8) -> bool {
+        let Some(layer_index) = Self::validate_requested_layer(layer) else {
+            return false;
+        };
+
+        self.request_active_layer(layer_index);
+        true
+    }
+
+    fn requested_layer_raw(&self) -> u8 {
+        self.requested_layer.value()
     }
 }
 

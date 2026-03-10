@@ -220,16 +220,16 @@ fn build_keyboard_layout() -> LayoutT {
                     rows: [
                         ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
                         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
-                        [u:Plus, 'X', 'C', 'V', f:PshLyrT(1), 'N', 'M', ',', '.', f:PshLyrT(1)],
+                        [u:Plus, 'X', 'C', 'V', f:LTRelSet(+1), 'N', 'M', ',', '.', f:LTPsh(1)],
                     ]
                 },
 
                 {
                     name: "test1",
                     rows: [
-                        ['Q', 'W', 'J', 'R', Caps, 'Y', 'U', 'I', 'O', 'P'],
+                        ['0', '1', '2', '3', Caps, 'Y', 'U', 'I', 'O', 'P'],
                         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ';'],
-                        [u:Plus, 'X', 'C', 'V', f:PshLyrT(1), 'N', 'M', ',', '.', f:PshLyrT(1)],
+                        [u:Plus, 'X', 'C', 'V', f:LTRelSet(+1), 'N', 'M', ',', '.', f:LTPsh(1)],
                     ]
                 }
             ]

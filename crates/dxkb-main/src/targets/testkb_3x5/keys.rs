@@ -13,7 +13,7 @@ impl CustomKeyContext {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum CustomKey {
     Default(DefaultKey),
     /// When pressed, presses both the LShift and the = key, so the plus symbol can be sent without any other keystroke.

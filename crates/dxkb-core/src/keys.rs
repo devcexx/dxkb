@@ -98,16 +98,85 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
                 }
             );
         }
+        BuiltinFunctionKey::SetLayer(new) => {
+            do_on_key_state!(
+                key_state,
+                {
+                    let _ = kb.state_mut().request_layer_raw(*new);
+                },
+                {
+
+                }
+            );
+        }
+        BuiltinFunctionKey::SetRelativeLayer(offset) => {
+            do_on_key_state!(
+                key_state,
+                {
+                    let state = kb.state_mut();
+                    let current = state.requested_layer_raw();
+                    let _ = state.request_layer_raw(current.saturating_add_signed(*offset));
+                },
+                {
+
+                }
+            );
+        }
+        BuiltinFunctionKey::SetRelativeLayerTransient(offset) => {
+            do_on_key_state!(
+                key_state,
+                {
+                    let state = kb.state_mut();
+                    let current = state.requested_layer_raw();
+                    let _ = state.request_layer_raw(current.saturating_add_signed(*offset));
+                },
+                {
+                    let state = kb.state_mut();
+                    let current = state.requested_layer_raw();
+                    let _ = state.request_layer_raw(current.saturating_sub_signed(*offset));
+                }
+            );
+        }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum BuiltinFunctionKey {
+    /// Pushes the current layer onto the layer stack and requests the next
+    /// layer (current + 1) to be active. When released, does nothing.
     PushNextLayer,
+
+    /// Pushes the current layer onto the layer stack and requests the given
+    /// layer to become the active one. When released, does nothing.
     PushLayer(u8),
+
+    /// Pops the most recent layer out of the stack and requests such layer to
+    /// become active. When released, does nothing.
     PopLayer,
+
+    /// Pushes the current layer onto the layer stack and requests the next
+    /// layer (current + 1) to be active. When released, pops the layer back, so
+    /// the previous one becomes active again.
     PushNextLayerTransient,
+
+    /// Pushes the current layer onto the layer stack and requests the given
+    /// layer to become the active one. When released, pops the layer back, so
+    /// the previous one becomes active again.
     PushLayerTransient(u8),
+
+    /// Requests the given layer to become the active one, without modifying the
+    /// layer stack. When released, does nothing.
+    SetLayer(u8),
+
+    /// Requests the current layer plus the given offset to become the active
+    /// one, without modifying the layer stack. When released, does nothing.
+    SetRelativeLayer(i8),
+
+    /// Requests the current layer plus the given offset to become the active
+    /// one, without modifying the layer stack. When released, does the opposite
+    /// and requests the current layer minus the given offset to become active
+    /// again.
+    SetRelativeLayerTransient(i8),
 }
 
 // TODO after the inclusion of the consumer control keys, the size of this enum
@@ -117,7 +186,7 @@ pub enum BuiltinFunctionKey {
 // enums, without changing the layout of the underlying enums, so alternatives
 // should be considered (e. g collapsing all the nested enums into the same one
 // and manually using the not used variants, etc).
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum DefaultKey {
     NoOp,
     Standard(KeyboardUsage),
@@ -295,21 +364,46 @@ macro_rules! hid_key_from_alias {
 
 #[macro_export]
 macro_rules! function_key_from_alias {
-    (PshNxtLyr) => {
+    (LPshNxt) => {
         $crate::keys::BuiltinFunctionKey::PushNextLayer
     };
-    (PshLyr($layer:literal)) => {
+    (LPsh($layer:literal)) => {
         $crate::keys::BuiltinFunctionKey::PushLayer($layer)
     };
-    (PopLyr) => {
+    (LPop) => {
         $crate::keys::BuiltinFunctionKey::PopLayer
     };
-    (PshNxtLyrT) => {
+    (LTPshNxt) => {
         $crate::keys::BuiltinFunctionKey::PushNextLayerTransient
     };
-    (PshLyrT($layer:literal)) => {
+    (LTPsh($layer:literal)) => {
         $crate::keys::BuiltinFunctionKey::PushLayerTransient(
             $layer,
+        )
+    };
+    (LSet($layer:literal)) => {
+        $crate::keys::BuiltinFunctionKey::SetLayer(
+            $layer,
+        )
+    };
+    (LRelSet(+$layer:literal)) => {
+        $crate::keys::BuiltinFunctionKey::SetRelativeLayer(
+            $layer,
+        )
+    };
+    (LRelSet(-$layer:literal)) => {
+        $crate::keys::BuiltinFunctionKey::SetRelativeLayer(
+            -$layer,
+        )
+    };
+    (LTRelSet(+$layer:literal)) => {
+        $crate::keys::BuiltinFunctionKey::SetRelativeLayerTransient(
+            $layer,
+        )
+    };
+    (LTRelSet(-$layer:literal)) => {
+        $crate::keys::BuiltinFunctionKey::SetRelativeLayerTransient(
+            -$layer,
         )
     };
 }
