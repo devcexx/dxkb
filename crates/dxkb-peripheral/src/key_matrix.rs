@@ -641,7 +641,7 @@ where
             // stabilize. I guess this should take around... 10 ns
             // with OSPEEDR set to medium. So at 96 MHz, two dummy
             // instructions are more than enough.
-            cortex_m::asm::delay(2);
+            cortex_m::asm::delay(10);
 
             let inputs = R::read_all(&self.input_pins);
             fence(Ordering::SeqCst);

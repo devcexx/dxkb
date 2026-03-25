@@ -68,7 +68,7 @@ pub type TKeyMatrix = KeyMatrix<
     KeyMatrixColPins,
     RowScan,
     TKeyMatrixDebounce,
-    OversamplingRead<8, 2>
+    OversamplingRead<8, 4>
 >;
 
 pub type TLayout = SplitKeyboardLayout<KeyboardLayoutConfig, CustomKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
