@@ -1,6 +1,9 @@
 #![no_std]
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
+#![feature(const_trait_impl)]
+#![feature(const_index)]
+#![feature(macro_metavar_expr)]
 
 use cortex_m::asm::bootload;
 use dxkb_common::dev_info;
@@ -13,6 +16,9 @@ pub mod uart_dma_rb;
 pub mod usart;
 pub mod dma;
 pub mod usb;
+
+#[cfg(feature = "stm32f411")]
+pub mod pin_set;
 
 pub trait InterruptReceiver {
     const INTERRUPT: Interrupt;

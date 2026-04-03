@@ -17,7 +17,7 @@ usb-force-slave = []
 
 
 [dependencies]
-dxkb-common = { path = "../dxkb-common", features = ["dev-log-level-trace"] }
+dxkb-common = { path = "../dxkb-common", features = ["dev-log-level-info"] }
 dxkb-core = { path = "../dxkb-core" }
 dxkb-peripheral = { path = "../dxkb-peripheral" }
 dxkb-split-link = { path = "../dxkb-split-link" }
@@ -39,3 +39,4 @@ usbd-hid = { workspace = true }
 vcell = { workspace = true }
 heapless.workspace = true
 hut.workspace = true
+stm32f4 = { path = "/home/devcexx/projects/stm32-rs/stm32f4", features = ["stm32f411"] }

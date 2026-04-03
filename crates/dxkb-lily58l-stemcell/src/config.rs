@@ -1,7 +1,7 @@
 use dxkb_core::{hid::ReportHidKeyboard, keyboard::{Left, Right, PinMasterSense, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig}, keys::DefaultKey};
-use dxkb_peripheral::{clock::DWTClock, key_matrix::{DebouncerEagerPerKey, KeyMatrix, OversamplingRead, PinsWithSamePort, RowScan, SingleShotRead}, uart_dma_rb::{HalfDuplex, UartDmaRb}};
+use dxkb_peripheral::{clock::DWTClock, key_matrix::{DebouncerEagerPerKey, KeyMatrix, RowScan}, uart_dma_rb::{HalfDuplex, UartDmaRb}};
 use dxkb_split_link::{DefaultSplitLinkTimings, SplitBus};
-use stm32f4xx_hal::{dma::{Stream5, Stream6, Stream7}, gpio::{Input, Output, Pin, PushPull}, otg_fs::USB, pac::{DMA1, DMA2, USART1, USART2}, signature::Uid};
+use stm32f4xx_hal::{dma::{Stream5, Stream6, Stream7}, gpio::{DynamicPin, Input, Output, Pin, PushPull}, otg_fs::USB, pac::{DMA1, DMA2, USART1, USART2}, signature::Uid};
 use synopsys_usb_otg::UsbBus;
 
 // The total layers of the layout.
@@ -18,31 +18,31 @@ const LAYOUT_COLS: u8 = 2 * SIDE_COLS;
 const DEBOUNCE_MILLIS: u8 = 20;
 
 pub type KeyMatrixRowPins = (
-    Pin<'B', 3, Output<PushPull>>,
-    Pin<'B', 4, Output<PushPull>>,
-    Pin<'B', 5, Output<PushPull>>,
-    Pin<'B', 8, Output<PushPull>>,
-    Pin<'B', 9, Output<PushPull>>,
+    DynamicPin<'B', 3>,
+    DynamicPin<'B', 4>,
+    DynamicPin<'B', 5>,
+    DynamicPin<'B', 8>,
+    DynamicPin<'B', 9>,
 );
 
 #[cfg(feature = "side-left")]
 pub type KeyMatrixColPins = (
-    Pin<'B', 1, Input>,
-    Pin<'B', 0, Input>,
-    Pin<'A', 5, Input>,
-    Pin<'A', 6, Input>,
-    Pin<'A', 7, Input>,
-    Pin<'A', 4, Input>,
+    DynamicPin<'B', 1>,
+    DynamicPin<'B', 0>,
+    DynamicPin<'A', 5>,
+    DynamicPin<'A', 6>,
+    DynamicPin<'A', 7>,
+    DynamicPin<'A', 4>,
 );
 
 #[cfg(feature = "side-right")]
 pub type KeyMatrixColPins = (
-    Pin<'A', 4, Input>,
-    Pin<'A', 7, Input>,
-    Pin<'A', 6, Input>,
-    Pin<'A', 5, Input>,
-    Pin<'B', 0, Input>,
-    Pin<'B', 1, Input>,
+    DynamicPin<'A', 4>,
+    DynamicPin<'A', 7>,
+    DynamicPin<'A', 6>,
+    DynamicPin<'A', 5>,
+    DynamicPin<'B', 0>,
+    DynamicPin<'B', 1>,
 );
 
 
@@ -68,7 +68,7 @@ pub type TKeyMatrix = KeyMatrix<
     KeyMatrixColPins,
     RowScan,
     TKeyMatrixDebounce,
-    OversamplingRead<8, 4>
+    ()
 >;
 
 pub type TLayout = SplitKeyboardLayout<KeyboardLayoutConfig, CustomKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;

@@ -5,333 +5,64 @@ use core::{
 
 use cortex_m::peripheral::DWT;
 use stm32f4xx_hal::{
-    gpio::{Input, Output, Pin, PinState, PushPull},
+    gpio::{PinState, Speed},
     time::Hertz,
 };
 
 use dxkb_common::{
-    dev_info, dev_trace, util::{self, bit_array_size, BitArray, BitArraySize, BitMatrix, BitMatrixLayout, ColBitMatrixLayout}, KeyState
+    dev_trace, util::{self, bit_array_size, BitArray, BitMatrix, BitMatrixLayout, ColBitMatrixLayout}, KeyState
 };
 
-use super::gpio::{GpioPort, GpioX};
+use crate::pin_set::{PinSet, PinSetSized};
 
-// TODO Replace this macros with crabtime functions.
-macro_rules! output_pins_impl {
-    (@ $npins:literal, $($port_const:ident $pin_const:ident)*, $($pin_lit:literal)*) => {
-        impl <$(const $port_const: char, const $pin_const: u8),*> Pins for (
-            $(
-                 Pin<$port_const, $pin_const, Output<PushPull>>
-            ),*
-        ) {
-            const COUNT: u8 = $npins;
-        }
+// /**
+//  * Represents a type that is able to read one or multiple times from a set of input pins, returning the result of folding all the results of every read sample.
+//  */
+// pub trait AggregateRead {
+//     type ReadResult<const PINS: u8, Src: InputPins<PINS>>: InputRead;
 
-        impl <$(const $port_const: char, const $pin_const: u8),*> OutputPins<$npins> for (
-            $(
-                 Pin<$port_const, $pin_const, Output<PushPull>>
-            ),*
-        ) {
-            fn set_state(&mut self, col: u8, value: PinState) {
-                seq_macro::seq!(N in 0..$npins {
-                    match col {
-                        #(
-                            N => self.N.set_state(value),
-                        )*
-                        _ => panic!("Attempt to set state of a row pin out of bounds!")
-                    }
-                });
-            }
+//     fn read_all<const PINS: u8, T: InputPins<PINS>>(pins: &T) -> Self::ReadResult<PINS, T>;
+// }
 
-            #[inline(always)]
-            fn setup_pins(&mut self) {
-                seq_macro::seq!(N in 0..$npins {
-                    // Sets the OSPEEDR registers to a reasonable
-                    // value. With this, a STM32F411 with Vdd > 2.7V
-                    // should take around 10 ns to raise a pin.
-                    self.N.set_speed(stm32f4xx_hal::gpio::Speed::Medium);
+// /**
+//  * Indicates that each pin must be read exactly once for each matrix scan.
+//  */
+// pub struct SingleShotRead;
 
-                    // Matrix scan uses active low for determining
-                    // whether a key is pressed. Therefore, output
-                    // pins will be high by default and pulled low
-                    // individually when matrix is scanned.
-                    self.N.set_state(stm32f4xx_hal::gpio::PinState::High);
-                });
-            }
-        }
-    };
+// impl AggregateRead for SingleShotRead {
+//     type ReadResult<const PINS: u8, Src: InputPins<PINS>> = Src::ReadResult;
 
-    ($($npins:literal),*) => {
-        $(
-        seq_macro::seq!(i in 0..$npins {
-            output_pins_impl!(@ $npins, #(P~i N~i)*, #(i)*);
-        });
-        )*
-    }
-}
+//     fn read_all<const PINS: u8, T: InputPins<PINS>>(pins: &T) -> Self::ReadResult<PINS, T> {
+//         pins.read_inputs()
+//     }
+// }
 
-macro_rules! input_pins_impl {
-    (@ $npins:literal, $($port_const:ident $pin_const:ident)*, $($pin_lit:literal)*) => {
-        impl <$(const $port_const: char, const $pin_const: u8),*> Pins for (
-            $(
-                 Pin<$port_const, $pin_const, Input>
-            ),*
-        ) {
-            const COUNT: u8 = $npins;
-        }
+// /**
+//  * Indicates that each pin will be read [`OVER`] number of times for each matrix
+//  * scan, leaving a delay between each sample read.
+//  */
+// pub struct OversamplingRead<
+//     const OVER: usize = 16,
+//     const DELAY_CYCLES: u32 = 2>
+// ;
 
-        impl <$(const $port_const: char, const $pin_const: u8),*> InputPins<$npins> for (
-            $(
-                 Pin<$port_const, $pin_const, Input>
-            ),*
-        ) {
-            type ReadResult = RawReadResults<$npins>;
+// impl <
+//     const OVER: usize,
+//     const DELAY_CYCLES: u32
+// > AggregateRead for OversamplingRead<OVER, DELAY_CYCLES> {
+//     type ReadResult<const PINS: u8, Src: InputPins<PINS>> = OversamplingReadResults<OVER, Src::ReadResult>;
 
-            fn read_inputs(&self) -> Self::ReadResult {
-                let mut reads = [false; $npins];
-                seq_macro::seq!(N in 0..$npins {
-                    reads[N] = self.N.is_low();
-                });
+//     fn read_all<const PINS: u8, T: InputPins<PINS>>(pins: &T) -> Self::ReadResult<PINS, T> {
+//         let results = util::slice::array_initialize(|_| {
+//             cortex_m::asm::delay(DELAY_CYCLES);
+//             pins.read_inputs()
+//         });
 
-                RawReadResults {
-                    read_result: BitArray::new_from_values(&reads)
-                }
-            }
-
-            fn setup_pins(&mut self) {
-                seq_macro::seq!(N in 0..$npins {
-                    self.N.set_internal_resistor(stm32f4xx_hal::gpio::Pull::Up);
-                });
-            }
-        }
-    };
-
-    ($($npins:literal),*) => {
-        $(
-        seq_macro::seq!(i in 0..$npins {
-            input_pins_impl!(@ $npins, #(P~i N~i)*, #(i)*);
-        });
-        )*
-    }
-}
-
-macro_rules! into_pins_with_same_port_impl {
-    ($($npins:literal),*) => {
-        $(
-           seq_macro::seq!(i in 0..$npins {
-               impl<const PORT: char, #(const N~i: u8,)*> IntoInputPinsWithSamePort for (#(Pin<PORT, N~i, Input>,)*) {
-                   type Output = PinsWithSamePort<(#(Pin<PORT, N~i, Input>,)*)>;
-
-                   fn into_input_pins_with_same_port(self) -> Self::Output {
-                       Self::Output {
-                           pins: self
-                       }
-                   }
-               }
-           });
-        )*
-    };
-}
-
-macro_rules! input_pins_same_port_impl {
-    ($($npins:literal),*) => {
-        $(
-          seq_macro::seq!(i in 0..$npins {
-              impl<const PORT: char, #(const N~i: u8,)*> Pins for PinsWithSamePort<(#(Pin<PORT, N~i, Input>,)*)> {
-                  const COUNT: u8 = $npins;
-              }
-
-              impl<const PORT: char, #(const N~i: u8,)*> InputPins<$npins> for PinsWithSamePort<(#(Pin<PORT, N~i, Input>,)*)> where GpioX<PORT>: GpioPort, SamePortReadResults<Self>: InputRead {
-                  type ReadResult = SamePortReadResults<Self>;
-
-                  fn read_inputs(&self) -> Self::ReadResult {
-                      SamePortReadResults {
-                          read_value: unsafe {
-                              // SAFETY: SamePortReadResults will make
-                              // sure only owned pins that are known
-                              // to be in a input mode are read.
-
-                              // Negate the value, since a low signal
-                              // means that the input is on.
-                              !GpioX::<PORT>::idr_value()
-                          },
-                          _data: PhantomData
-                      }
-                  }
-
-                  fn setup_pins(&mut self) {
-                      #(
-                          self.pins.i.set_internal_resistor(stm32f4xx_hal::gpio::Pull::Up);
-                      )*
-                  }
-              }
-
-              impl<const PORT: char, #(const N~i: u8,)*> InputRead for SamePortReadResults<PinsWithSamePort<(#(Pin<PORT, N~i, Input>,)*)>> {
-                  fn is_on(&self, pin_index: u8) -> bool {
-                      let mask = match pin_index {
-                          #(
-                              i => 1 << N~i,
-                          )*
-                          _ => panic!("Out of bounds!")
-                      };
-
-                      (self.read_value & mask) > 0
-                  }
-              }
-          });
-        )*
-    };
-}
-
-// Implement [`OutputPins`] for different number of pins.
-output_pins_impl!(2, 3, 4, 5, 6);
-
-
-// Implement [`InputPins`] for different number of pins.
-input_pins_impl!(2, 3, 4, 5, 6);
-
-// Implement [`IntoInputPinsWithSamePort`] for different
-// number of pins. This allows converting a tuple of pins into [`PinsWithSamePort<T>`],
-// so that all pins can be read at once from a single register.
-into_pins_with_same_port_impl!(2, 3, 4, 5, 6);
-
-// Implement [`InputPins`] for different number of pins, that are
-// located at the same GPIO port.
-input_pins_same_port_impl!(2, 3, 4, 5, 6);
-
-/// Holds the result of reading a GPIO register that holds the input
-/// value of multiple pins, defined by the type T.
-pub struct SamePortReadResults<T> {
-    read_value: u32,
-    _data: PhantomData<T>,
-}
-
-pub struct RawReadResults<const PINS: u8> where [(); bit_array_size(PINS as usize)]: {
-    read_result: BitArray<{PINS as usize}>
-}
-
-impl<const N: u8> InputRead for RawReadResults<N> where [(); bit_array_size(N as usize)]: {
-    fn is_on(&self, pin_index: u8) -> bool {
-        self.read_result.get(pin_index as usize)
-    }
-}
-
-pub struct OversamplingReadResults<const OVER: usize, T: InputRead> {
-    read_result: [T; OVER],
-}
-
-impl <const OVER: usize, T: InputRead> InputRead for OversamplingReadResults<OVER, T> {
-    fn is_on(&self, pin_index: u8) -> bool {
-        let mut on_count = 0;
-        for i in 0..OVER {
-            if self.read_result[i].is_on(pin_index) {
-                on_count += 1;
-            }
-
-            if on_count >= OVER / 2 {
-                return true;
-            }
-        }
-
-        false
-    }
-}
-
-/// Represents a type that can be converted into a type (that conforms
-/// to [`InputPins`]), that can read input values from different pins
-/// from a single GPIO register.
-pub trait IntoInputPinsWithSamePort {
-    type Output;
-
-    fn into_input_pins_with_same_port(self) -> Self::Output;
-}
-
-/// Represents a set of input ports that are located in the same GPIO
-/// port. This struct implements the [`InputPins`] trait,
-/// reading all the input values in all the pins in the same cycle!
-pub struct PinsWithSamePort<T> {
-    pins: T,
-}
-
-/// Represents a type that holds a read of the status of multiple
-/// input pins.
-pub trait InputRead {
-    /// Returns true if the input of the pin indicates that the pin is "on". By
-    /// "on", we refer "on" from the user perspective, and not from the
-    /// electrical perspective. In an active-low configuration, like the one
-    /// implemented in the key matrix, it should be considered that a pin is
-    /// "on" when its input is low.
-    fn is_on(&self, pin_index: u8) -> bool;
-}
-
-pub trait Pins {
-    const COUNT: u8;
-}
-
-/// Represents a type that holds a set of input pins whose value can
-/// be read all at once.
-pub trait InputPins<const C: u8>: Pins {
-    type ReadResult: InputRead;
-
-    fn read_inputs(&self) -> Self::ReadResult;
-    fn setup_pins(&mut self);
-}
-
-/**
- * Represents a type that is able to read one or multiple times from a set of input pins, returning the result of folding all the results of every read sample.
- */
-pub trait AggregateRead {
-    type ReadResult<const PINS: u8, Src: InputPins<PINS>>: InputRead;
-
-    fn read_all<const PINS: u8, T: InputPins<PINS>>(pins: &T) -> Self::ReadResult<PINS, T>;
-}
-
-/**
- * Indicates that each pin must be read exactly once for each matrix scan.
- */
-pub struct SingleShotRead;
-
-impl AggregateRead for SingleShotRead {
-    type ReadResult<const PINS: u8, Src: InputPins<PINS>> = Src::ReadResult;
-
-    fn read_all<const PINS: u8, T: InputPins<PINS>>(pins: &T) -> Self::ReadResult<PINS, T> {
-        pins.read_inputs()
-    }
-}
-
-/**
- * Indicates that each pin will be read [`OVER`] number of times for each matrix
- * scan, leaving a delay between each sample read.
- */
-pub struct OversamplingRead<
-    const OVER: usize = 16,
-    const DELAY_CYCLES: u32 = 2>
-;
-
-impl <
-    const OVER: usize,
-    const DELAY_CYCLES: u32
-> AggregateRead for OversamplingRead<OVER, DELAY_CYCLES> {
-    type ReadResult<const PINS: u8, Src: InputPins<PINS>> = OversamplingReadResults<OVER, Src::ReadResult>;
-
-    fn read_all<const PINS: u8, T: InputPins<PINS>>(pins: &T) -> Self::ReadResult<PINS, T> {
-        let results = util::slice::array_initialize(|_| {
-            cortex_m::asm::delay(DELAY_CYCLES);
-            pins.read_inputs()
-        });
-
-        OversamplingReadResults {
-            read_result: results
-        }
-    }
-}
-
-
-/// Represents a type that holds a set of pins that can be turned on
-/// or off individually for scanning a key matrix.
-pub trait OutputPins<const C: u8>: Pins {
-    fn set_state(&mut self, col: u8, value: PinState);
-    fn setup_pins(&mut self);
-}
+//         OversamplingReadResults {
+//             read_result: results
+//         }
+//     }
+// }
 
 /// Represents a type that is able to debounce the input signal
 /// generated by a button, attempting to remove the noise generated by
@@ -468,8 +199,8 @@ where
 /// conforms to this trait. See [`ColumnScan`] and [`RowScan`] for
 /// more info.
 pub trait MatrixScan<const ROWS: u8, const COLS: u8, RowPins, ColPins> {
-    type InPins: Pins;
-    type OutPins: Pins;
+    type InPins: PinSet;
+    type OutPins: PinSet;
 
     fn translate_pins(rows: RowPins, cols: ColPins) -> (Self::InPins, Self::OutPins);
     fn translate_indexes(input_pin_index: u8, output_pin_index: u8) -> (u8, u8);
@@ -484,8 +215,8 @@ pub struct ColumnScan {}
 impl<const ROWS: u8, const COLS: u8, RowPins, ColPins> MatrixScan<ROWS, COLS, RowPins, ColPins>
     for ColumnScan
 where
-    RowPins: InputPins<ROWS>,
-    ColPins: OutputPins<COLS>,
+    RowPins: PinSet,
+    ColPins: PinSet,
 {
     type InPins = RowPins;
     type OutPins = ColPins;
@@ -508,8 +239,8 @@ pub struct RowScan {}
 impl<const ROWS: u8, const COLS: u8, RowPins, ColPins> MatrixScan<ROWS, COLS, RowPins, ColPins>
     for RowScan
 where
-    RowPins: OutputPins<ROWS>,
-    ColPins: InputPins<COLS>,
+    RowPins: PinSet,
+    ColPins: PinSet
 {
     type InPins = ColPins;
     type OutPins = RowPins;
@@ -570,7 +301,7 @@ pub struct KeyMatrix<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D, R>
 where
     [(); ROWS as usize]:,
     S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
-    R: AggregateRead,
+//    R: AggregateRead,
     ColBitMatrixLayout<COLS>: BitMatrixLayout,
 {
     matrix: BitMatrix<{ ROWS as usize }, COLS>,
@@ -580,21 +311,41 @@ where
     sysclk_freq: Hertz, // TODO Change by usage of Clock trait
 }
 
+const fn assert_pin_sets_match_matrix_dimensions(expected_rows: u8, got_rows: usize, expected_cols: u8, got_cols: usize) {
+    assert!(expected_rows as usize == got_rows, "Provided row pins don't match the expected number of rows in the matrix!");
+    assert!(expected_cols as usize == got_cols, "Provided column pins don't match the expected number of columns in the matrix!");
+}
+
 impl<const ROWS: u8, const COLS: u8, RowPins, ColPins, S, D, R>
     KeyMatrix<ROWS, COLS, RowPins, ColPins, S, D, R>
 where
     [(); ROWS as usize]:,
+    RowPins: PinSet,
+    ColPins: PinSet,
     S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
     D: Debounce<ROWS, COLS>,
-    R: AggregateRead,
+//    R: AggregateRead,
     ColBitMatrixLayout<COLS>: BitMatrixLayout,
-    S::InPins: InputPins<{ S::InPins::COUNT }>,
-    S::OutPins: OutputPins<{ S::OutPins::COUNT }>,
+
 {
     pub fn new(sysclk_freq: Hertz, rows: RowPins, cols: ColPins, debouncer: D) -> Self {
+        const {
+            // Doing a const assertion rather than a type assertion because
+            // otherwise the error generated by the compiler is quite confusing.
+            assert_pin_sets_match_matrix_dimensions(ROWS, RowPins::NUM_PINS, COLS, ColPins::NUM_PINS)
+        }
+
         let (mut in_pins, mut out_pins) = S::translate_pins(rows, cols);
-        in_pins.setup_pins();
-        out_pins.setup_pins();
+        in_pins.make_input_pull_up();
+        out_pins.make_output_push_pull();
+
+        in_pins.set_speed(Speed::High);
+        out_pins.set_speed(Speed::High);
+
+        // Using active-low for determining whether matrix buttons are pressed,
+        // so all the out pins are set to 1 until they're scanned, when
+        // individually become 0
+        out_pins.write_all(true);
 
         Self {
             matrix: BitMatrix::new(),
@@ -612,10 +363,10 @@ where
     [(); ROWS as usize]:,
     S: MatrixScan<ROWS, COLS, RowPins, ColPins>,
     D: Debounce<ROWS, COLS>,
-    R: AggregateRead,
+//    R: AggregateRead,
     ColBitMatrixLayout<COLS>: BitMatrixLayout,
-    S::InPins: InputPins<{ S::InPins::COUNT }>,
-    S::OutPins: OutputPins<{ S::OutPins::COUNT }>,
+    [(); S::InPins::NUM_PINS]:
+
 {
     #[inline(always)]
     fn get_key_state(&self, row: u8, col: u8) -> KeyState {
@@ -628,30 +379,50 @@ where
             .set_value(row as usize, col, state == KeyState::Pressed);
     }
 
+    #[inline(never)]
     fn scan_matrix_act<F: FnMut(u8, u8, KeyState) -> ()>(&mut self, mut changed_fn: F) -> bool {
         let current_millis =
             ((DWT::cycle_count() as u64) * 1000 / self.sysclk_freq.raw() as u64) as u32;
         let mut has_changed = false;
 
-        for output_pin_index in 0..S::OutPins::COUNT {
-            self.output_pins.set_state(output_pin_index, PinState::Low);
+        for output_pin_index in 0..S::OutPins::NUM_PINS {
+            self.output_pins.write_single(output_pin_index as u32, false);
             fence(Ordering::SeqCst);
 
             // Wait a couple of cycles to let the gpio pin
             // stabilize. I guess this should take around... 10 ns
             // with OSPEEDR set to medium. So at 96 MHz, two dummy
             // instructions are more than enough.
-            cortex_m::asm::delay(10);
+            unsafe {
+                core::arch::asm! {
+                    "nop",
+                    "nop"
+                };
+            }
 
-            let inputs = R::read_all(&self.input_pins);
+            // TODO Recover oversampling
+//            let inputs = R::(&self.input_pins);
+            let inputs = self.input_pins.read().get_all(); // TODO Maybe we don't need to call get_all and just is_on on every read pin
             fence(Ordering::SeqCst);
-            self.output_pins.set_state(output_pin_index, PinState::High);
+
+            self.output_pins.write_single(output_pin_index as u32, true);
+
+
+            // Temporarily set the output pins to output and write a high in
+            // them, so they can quickly charge the capacitance of the diodes in
+            // the matrix, and preventing a slow loading curve that would make
+            // the input pins to restore the Vdd voltage due to the high
+            // impedance of the line.
+            fence(Ordering::SeqCst);
+            self.input_pins.make_output_push_pull();
+            self.input_pins.write_all(true);
+            self.input_pins.make_input_pull_up();
 
             // This section should be already enough to give some time to the column pin to go low.
-            for input_pin_index in 0..S::InPins::COUNT {
-                let new_state = KeyState::from_bool(inputs.is_on(input_pin_index));
+            for input_pin_index in 0..S::InPins::NUM_PINS {
+                let new_state = KeyState::from_bool(!inputs[input_pin_index]);
 
-                let (row, col) = S::translate_indexes(input_pin_index, output_pin_index);
+                let (row, col) = S::translate_indexes(input_pin_index as u8, output_pin_index as u8);
                 let prev_state = self.get_key_state(row, col);
 
                 let effective_state =

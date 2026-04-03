@@ -195,29 +195,29 @@ fn main0() -> ! {
 
     let matrix = init_key_matrix(
         (
-            gpiob.pb3.into_push_pull_output(),
-            gpiob.pb4.into_push_pull_output(),
-            gpiob.pb5.into_push_pull_output(),
-            gpiob.pb8.into_push_pull_output(),
-            gpiob.pb9.into_push_pull_output(),
+            gpiob.pb3.into_dynamic(),
+            gpiob.pb4.into_dynamic(),
+            gpiob.pb5.into_dynamic(),
+            gpiob.pb8.into_dynamic(),
+            gpiob.pb9.into_dynamic(),
         ),
         #[cfg(feature = "side-left")]
         (
-            gpiob.pb1.into_pull_up_input(),
-            gpiob.pb0.into_pull_up_input(),
-            gpioa.pa5.into_pull_up_input(),
-            gpioa.pa6.into_pull_up_input(),
-            gpioa.pa7.into_pull_up_input(),
-            gpioa.pa4.into_pull_up_input(),
+            gpiob.pb1.into_dynamic(),
+            gpiob.pb0.into_dynamic(),
+            gpioa.pa5.into_dynamic(),
+            gpioa.pa6.into_dynamic(),
+            gpioa.pa7.into_dynamic(),
+            gpioa.pa4.into_dynamic(),
         ),
         #[cfg(feature = "side-right")]
         (
-            gpioa.pa4.into_pull_up_input(),
-            gpioa.pa7.into_pull_up_input(),
-            gpioa.pa6.into_pull_up_input(),
-            gpioa.pa5.into_pull_up_input(),
-            gpiob.pb0.into_pull_up_input(),
-            gpiob.pb1.into_pull_up_input(),
+            gpioa.pa4.into_dynamic(),
+            gpioa.pa7.into_dynamic(),
+            gpioa.pa6.into_dynamic(),
+            gpioa.pa5.into_dynamic(),
+            gpiob.pb0.into_dynamic(),
+            gpiob.pb1.into_dynamic(),
         ),
         &clocks,
     );

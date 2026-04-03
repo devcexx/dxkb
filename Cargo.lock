@@ -460,6 +460,7 @@ dependencies = [
  "seq-macro",
  "serde",
  "ssmarshal",
+ "stm32f4",
  "stm32f4xx-hal",
  "synopsys-usb-otg",
  "usb-device",
@@ -1273,6 +1274,16 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
+
+[[package]]
+name = "stm32f4"
+version = "0.16.0"
+dependencies = [
+ "cortex-m 0.7.7",
+ "cortex-m-rt",
+ "critical-section",
+ "vcell",
+]
 
 [[package]]
 name = "stm32f4-staging"

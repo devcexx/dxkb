@@ -37,7 +37,7 @@ use dxkb_core::log::RingBufferLogger;
 use dxkb_main::{CurrentSide, MasterCheckType, make_usb_master_checker};
 use dxkb_peripheral::clock::DWTClock;
 use dxkb_peripheral::key_matrix::{
-    DebouncerEagerPerKey, IntoInputPinsWithSamePort, KeyMatrix, OversamplingRead, PinsWithSamePort, RowScan, SingleShotRead
+    DebouncerEagerPerKey, KeyMatrix, RowScan
 };
 use dxkb_common::bus::BusWrite;
 use dxkb_common::bus::BusRead;
@@ -54,7 +54,7 @@ use dxkb_core::usb::UsbFeatureSet;
 use ringbuffer::ConstGenericRingBuffer;
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::alt::sys;
-use stm32f4xx_hal::gpio::{Input, Output, Pin, PushPull};
+use stm32f4xx_hal::gpio::{DynamicPin, Input, Output, Pin, PushPull};
 use stm32f4xx_hal::pac::{Interrupt, DMA2, DWT, EXTI, USART1};
 use stm32f4xx_hal::rcc::Clocks;
 use stm32f4xx_hal::signature::Uid;
@@ -84,17 +84,17 @@ const LAYOUT_ROWS: u8 = SIDE_ROWS;
 const LAYOUT_COLS: u8 = 2 * SIDE_COLS;
 
 type KeyMatrixRowPins = (
-    Pin<'B', 10, Output<PushPull>>,
-    Pin<'B', 2, Output<PushPull>>,
-    Pin<'B', 1, Output<PushPull>>,
+    DynamicPin<'B', 10>,
+    DynamicPin<'B', 2>,
+    DynamicPin<'B', 1>,
 );
 
 type KeyMatrixColPins = (
-    Pin<'A', 6, Input>,
-    Pin<'A', 5, Input>,
-    Pin<'A', 4, Input>,
-    Pin<'A', 3, Input>,
-    Pin<'A', 2, Input>,
+    DynamicPin<'A', 6>,
+    DynamicPin<'A', 5>,
+    DynamicPin<'A', 4>,
+    DynamicPin<'A', 3>,
+    DynamicPin<'A', 2>,
 );
 
 // Pin that will be used to test whether the current controller is
@@ -118,7 +118,7 @@ type KeyMatrixT = KeyMatrix<
     KeyMatrixColPins,
     RowScan,
     KeyMatrixDebounce,
-    SingleShotRead
+    ()
 >;
 
 type SplitBusUsart = USART1;
@@ -306,16 +306,16 @@ fn main0() -> ! {
 
     let matrix = init_key_matrix(
         (
-            gpiob.pb10.into_push_pull_output(),
-            gpiob.pb2.into_push_pull_output(),
-            gpiob.pb1.into_push_pull_output(),
+            gpiob.pb10.into_dynamic(),
+            gpiob.pb2.into_dynamic(),
+            gpiob.pb1.into_dynamic(),
         ),
         (
-            gpioa.pa6.into_pull_up_input(),
-            gpioa.pa5.into_pull_up_input(),
-            gpioa.pa4.into_pull_up_input(),
-            gpioa.pa3.into_pull_up_input(),
-            gpioa.pa2.into_pull_up_input(),
+            gpioa.pa6.into_dynamic(),
+            gpioa.pa5.into_dynamic(),
+            gpioa.pa4.into_dynamic(),
+            gpioa.pa3.into_dynamic(),
+            gpioa.pa2.into_dynamic(),
         ),
         &clocks,
     );
