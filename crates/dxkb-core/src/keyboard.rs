@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
 use dxkb_common::{
-    dev_error, dev_info, dev_trace, dev_warn, time::Clock, util::{BitMatrix, BitMatrixLayout, BoundedU8, ColBitMatrixLayout, ConstCond, IsTrue}, KeyState
+    KeyState, LogicalKeyState, dev_error, dev_info, dev_trace, dev_warn, time::Clock, util::{BitArray, BitMatrix, BitMatrixLayout, BoundedU8, ColBitMatrixLayout, ConstCond, IsTrue, TwoBits}
 };
 use dxkb_peripheral::{key_matrix::KeyMatrixLike, usb::UsbRemoteWakeup};
 use dxkb_split_link::SplitBusLike;
@@ -113,6 +113,18 @@ pub trait SplitKeyboardLike<State> {
     fn hid_mut(&mut self) -> &mut Self::Hid;
 }
 
+
+pub const fn matrix_size(rows: u8, cols: u8) -> usize {
+    rows as usize * cols as usize
+}
+
+// This is so horrible, fuck const generics :/
+macro_rules! valid_matrix_size {
+    ($rows:ident, $cols:ident) => {
+        ::dxkb_common::util::bit_array_size::<::dxkb_common::util::TwoBits>(matrix_size($rows, $cols))
+    };
+}
+
 pub struct SplitKeyboard<
     const LLAYERS: u8,
     const LROWS: u8,
@@ -129,10 +141,10 @@ pub struct SplitKeyboard<
     SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
     User,
 > where
-    ColBitMatrixLayout<LCOLS>: BitMatrixLayout,
     [(); LLAYERS as usize]:,
     [(); LCOLS as usize]:,
     [(); LROWS as usize]:,
+    [(); valid_matrix_size!(LROWS, LCOLS)]:,
     ConstCond<{ LLAYERS > 0 }>: IsTrue,
 {
     clock: Clk,
@@ -190,13 +202,13 @@ where
     Hid: HidKeyboard,
     LayoutConfig: SplitLayoutConfig,
     Key: HandleKey<User = User>,
-    ColBitMatrixLayout<LCOLS>: BitMatrixLayout,
     Matrix: KeyMatrixLike<MROWS, MCOLS>,
     MasterTester: MasterCheck,
     SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
     [(); LLAYERS as usize]:,
     [(); LCOLS as usize]:,
     [(); LROWS as usize]:,
+    [(); valid_matrix_size!(LROWS, LCOLS)]:,
     ConstCond<{ LLAYERS > 0 }>: IsTrue,
 {
     const fn assert_config_ok() {
@@ -249,16 +261,16 @@ where
         user: &mut User,
     ) {
         let (real_row, real_col) = self.layout.get_real_key_coordinate::<Side>(row, col);
-        let changed = self
+        let (old, new) = self
             .state
-            .set_real_key_state(real_row, real_col, current_state);
+            .notify_physical_key_change(real_row, real_col, current_state);
 
-        if changed {
+        if old != new {
             let key: Key = self
                 .layout
                 .get_key_definition(self.state.current_layer, real_row, real_col)
                 .clone();
-            key.handle_key_state_change::<_, Self>(self, user, current_state);
+            key.handle_key_state_change::<_, Self>(self, user, old, new);
         }
     }
 
@@ -272,13 +284,15 @@ where
         // skipped if the old and the new key are the same.
         let mut pending_pressed = self.state.pressed_key_count;
         if self.state.requested_layer != self.state.current_layer {
+            dev_trace!("Start layer sync. Pressed keys: {}", pending_pressed);
             for row in 0..LROWS {
                 for col in 0..LCOLS {
                     if pending_pressed == 0 {
                         break;
                     }
 
-                    if self.state.get_real_key_state(row, col) == KeyState::Pressed {
+                    let old_state = self.state.get_real_key_state(row, col);
+                    if old_state.is_physically_pressed() {
                         pending_pressed -= 1;
 
                         let old_key = self.layout.get_key_definition(self.state.current_layer, row, col);
@@ -288,8 +302,23 @@ where
                             let new_key = new_key.clone();
                             let old_key = old_key.clone();
 
-                            old_key.handle_key_state_change::<_, Self>(self, user, KeyState::Released);
-                            new_key.handle_key_state_change::<_, Self>(self, user, KeyState::Pressed);
+                            // The old key was pressed and it vanishes from the
+                            // keyboard, so it becomes released from whatever
+                            // state it was (either pressed or masked at this
+                            // point)
+                            old_key.handle_key_state_change::<_, Self>(self, user, old_state, LogicalKeyState::Released);
+
+                            // The new key appears from thin air, so it
+                            // transitions from released to masked. This new
+                            // masked state advises the key to have no effect
+                            // until the user physically releases and re-presses
+                            // the key manually. This prevents a common
+                            // situation when a transient layer change key is
+                            // released before another key has been released, so
+                            // the latter is considered a new press and the
+                            // action is ran, which is quite annoying.
+                            new_key.handle_key_state_change::<_, Self>(self, user, LogicalKeyState::Released, LogicalKeyState::PressedMasked);
+                            self.state.mask_key(row, col);
                         }
                     }
                 }
@@ -460,13 +489,13 @@ where
     Hid: HidKeyboard,
     LayoutConfig: SplitLayoutConfig,
     Key: HandleKey<User = User>,
-    ColBitMatrixLayout<LCOLS>: BitMatrixLayout,
     Matrix: KeyMatrixLike<MROWS, MCOLS>,
     MasterTester: MasterCheck,
     SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
     [(); LLAYERS as usize]:,
     [(); LCOLS as usize]:,
     [(); LROWS as usize]:,
+    [(); valid_matrix_size!(LROWS, LCOLS)]:,
     ConstCond<{ LLAYERS > 0 }>: IsTrue,
 {
     type User = User;
@@ -562,7 +591,8 @@ pub trait HandleKey: Sized + Clone + PartialEq + Eq {
         &self,
         kb: &mut Kb,
         user: &mut Self::User,
-        key_state: KeyState,
+        old_state: LogicalKeyState,
+        new_state: LogicalKeyState,
     );
 
     // TODO Maybe have a function like this to separate the key state change from the keyboard report update.
@@ -608,11 +638,11 @@ pub trait KeyboardStateLike {
 
 pub struct KeyboardState<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8>
 where
-    ColBitMatrixLayout<COLS>: BitMatrixLayout,
     [(); ROWS as usize]:,
     [(); LAYERS as usize]:,
     [(); COLS as usize]:,
     [(); ROWS as usize]:,
+    [(); valid_matrix_size!(ROWS, COLS)]:,
     ConstCond<{ LAYERS > 0 }>: IsTrue,
 {
     // Once the stack gets full, it will smash the last recent entry to make room for the new one.
@@ -626,7 +656,7 @@ where
     /// The matrix holding the states of each key. This matrix holds not only
     /// the local pressed keys, like the key matrix controller, but also the
     /// states of the remote peer side, when working as master.
-    matrix_state: BitMatrix<{ ROWS as usize }, COLS>,
+    matrix_state: BitArray<TwoBits, {matrix_size(ROWS, COLS)}>,
 
     /// The current layer selected, that will receive the keyboard events
     current_layer: BoundedU8<LAYERS>,
@@ -648,21 +678,27 @@ where
 impl<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8>
     KeyboardState<K, LAYERS, ROWS, COLS>
 where
-    ColBitMatrixLayout<COLS>: BitMatrixLayout,
     [(); LAYERS as usize]:,
     [(); COLS as usize]:,
     [(); ROWS as usize]:,
+    [(); valid_matrix_size!(ROWS, COLS)]:,
     ConstCond<{ LAYERS > 0 }>: IsTrue,
 {
     pub const fn new() -> Self {
         Self {
             layers_stack: Vec::new(),
-            matrix_state: BitMatrix::<{ ROWS as usize }, COLS>::new(),
+            // do NOT allow this to try to infer types, otherwise Rust compiler could throw an ICE.
+            matrix_state: BitArray::<TwoBits, {matrix_size(ROWS, COLS)}>::new(),
             current_layer: BoundedU8::ZERO,
             requested_layer: BoundedU8::ZERO,
             _phantom: PhantomData,
             pressed_key_count: 0,
         }
+    }
+
+    #[inline(always)]
+    const fn get_key_matrix_state_coord(row: u8, col: u8) -> usize {
+        return row as usize * COLS as usize + col as usize
     }
 
     fn validate_requested_layer(layer: u8) -> Option<BoundedU8<LAYERS>> {
@@ -674,24 +710,59 @@ where
         ret
     }
 
-    #[inline(always)]
-    fn set_real_key_state(&mut self, row: u8, col: u8, state: KeyState) -> bool {
-        let changed = self
-            .matrix_state
-            .set_value(row as usize, col, state.to_bool());
 
-        if changed {
-            match state {
-                KeyState::Released => self.pressed_key_count -= 1,
-                KeyState::Pressed => self.pressed_key_count += 1,
-            }
+    #[inline(always)]
+    fn notify_physical_key_change(&mut self, real_row: u8, real_col: u8, phys_state: KeyState) -> (LogicalKeyState, LogicalKeyState) {
+        let old_state = self.get_real_key_state(real_row, real_col);
+
+        // Explictly defines the FSM transitions between LogicalKeyState states
+        // based on the physical events received (key press, key released)
+        let new_state = match (old_state, phys_state) {
+            (LogicalKeyState::Released, KeyState::Released) => LogicalKeyState::Released,
+            (LogicalKeyState::Released, KeyState::Pressed) => LogicalKeyState::Pressed,
+            (LogicalKeyState::Pressed, KeyState::Released) => LogicalKeyState::Released,
+            (LogicalKeyState::Pressed, KeyState::Pressed) => LogicalKeyState::Pressed,
+            (LogicalKeyState::PressedMasked, KeyState::Released) => LogicalKeyState::Released,
+
+            // A masked key can only get out of this state when a release event happens.
+            (LogicalKeyState::PressedMasked, KeyState::Pressed) => LogicalKeyState::PressedMasked,
+        };
+
+        if old_state != new_state {
+            self
+                .matrix_state
+                .put(Self::get_key_matrix_state_coord(real_row, real_col), new_state as u8);
+            Self::update_key_pressed_counter(old_state, new_state, &mut self.pressed_key_count);
+            dev_trace!("Key state change: ({}, {}); ({:?}, {:?}) => {:?}", real_row, real_col, old_state, phys_state, new_state);
         }
 
-        changed
+        (old_state, new_state)
     }
 
-    fn get_real_key_state(&self, row: u8, col: u8) -> KeyState {
-        KeyState::from_bool(self.matrix_state.get_value(row as usize, col))
+    fn update_key_pressed_counter(old_state: LogicalKeyState, new_state: LogicalKeyState, pressed_key_count: &mut u8) {
+        if old_state.is_physically_pressed() != new_state.is_physically_pressed() {
+            if new_state.is_physically_pressed() {
+                *pressed_key_count += 1
+            } else {
+                *pressed_key_count -= 1
+            }
+        }
+    }
+
+    fn mask_key(&mut self, real_row: u8, real_col: u8) {
+        let old_state = self.matrix_state.put(Self::get_key_matrix_state_coord(real_row, real_col), LogicalKeyState::PressedMasked as u8);
+        let old_state = LogicalKeyState::from_u8(old_state);
+        if old_state == LogicalKeyState::Released {
+            dev_error!("Attempt to mask the released key ({}, {}). This MUST NOT happen!", real_row, real_col)
+        } else if old_state != LogicalKeyState::PressedMasked {
+            dev_trace!("Key masked: ({}, {})", real_row, real_col);
+        }
+
+        Self::update_key_pressed_counter(old_state, LogicalKeyState::PressedMasked, &mut self.pressed_key_count);
+    }
+
+    fn get_real_key_state(&self, row: u8, col: u8) -> LogicalKeyState {
+        LogicalKeyState::from_u8(self.matrix_state.get(Self::get_key_matrix_state_coord(row, col)))
     }
 
     fn request_active_layer(&mut self, layer: BoundedU8<LAYERS>) {
@@ -727,10 +798,10 @@ where
 impl<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8> KeyboardStateLike
     for KeyboardState<K, LAYERS, ROWS, COLS>
 where
-    ColBitMatrixLayout<COLS>: BitMatrixLayout,
     [(); LAYERS as usize]:,
     [(); COLS as usize]:,
     [(); ROWS as usize]:,
+    [(); valid_matrix_size!(ROWS, COLS)]:,
     ConstCond<{ LAYERS > 0 }>: IsTrue,
 {
     fn push_layer_raw(&mut self, new_layer: u8) -> Option<u8> {
@@ -781,7 +852,6 @@ pub struct SplitKeyboardLayout<
     const ROWS: u8,
     const COLS: u8,
 > where
-    ColBitMatrixLayout<COLS>: BitMatrixLayout,
     [(); LAYERS as usize]:,
     [(); COLS as usize]:,
     [(); ROWS as usize]:,
@@ -793,7 +863,6 @@ pub struct SplitKeyboardLayout<
 impl<C: SplitLayoutConfig, Key, const LAYERS: u8, const ROWS: u8, const COLS: u8>
     SplitKeyboardLayout<C, Key, LAYERS, ROWS, COLS>
 where
-    ColBitMatrixLayout<COLS>: BitMatrixLayout,
     [(); LAYERS as usize]:,
     [(); COLS as usize]:,
     [(); ROWS as usize]:,

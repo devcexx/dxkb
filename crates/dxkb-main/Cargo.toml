@@ -17,7 +17,7 @@ usb-force-slave = []
 
 
 [dependencies]
-dxkb-common = { path = "../dxkb-common", features = ["dev-log-level-info"] }
+dxkb-common = { path = "../dxkb-common", features = ["dev-log-level-trace"] }
 dxkb-core = { path = "../dxkb-core" }
 dxkb-peripheral = { path = "../dxkb-peripheral" }
 dxkb-split-link = { path = "../dxkb-split-link" }

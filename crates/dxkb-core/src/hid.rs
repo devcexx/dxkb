@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use dxkb_common::{
-    dev_debug, dev_error, dev_info, dev_trace, time::Clock, util::{self, BitArray, ConstU8, ConstU8Like}
+    dev_debug, dev_error, dev_info, dev_trace, time::Clock, util::{self, BitArray, ConstU8, ConstU8Like, OneBit}
 };
 use hut::Consumer;
 use stm32f4xx_hal::pac::OTG_FS_DEVICE;
@@ -125,7 +125,7 @@ const _: () = assert!(
     "Report protocol HID keyboard keys usage counts that are not divisible by 8 are not supported at this point"
 );
 
-type ReportHidKeyboardUsageBitArray = BitArray<REPORT_HID_KB_USAGE_COUNT>;
+type ReportHidKeyboardUsageBitArray = BitArray<OneBit, REPORT_HID_KB_USAGE_COUNT>;
 type ReportHidConsumerControlReportId = ConstU8<1>;
 type ReportHidKeyboardReportId = ConstU8<2>;
 
@@ -390,8 +390,9 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
             .kb
             .report
             .keys
-            .set(key as usize - REPORT_HID_KB_USAGE_MIN as usize)
+            .put(key as usize - REPORT_HID_KB_USAGE_MIN as usize, true) == false
         {
+            // Wasn't pressed, now pressed
             self.kb_pressed_count += 1;
             self.kb.set_dirty();
             Ok(())
@@ -408,8 +409,9 @@ impl<'a, B: UsbBus> HidKeyboard for ReportHidKeyboard<'a, B> {
             .kb
             .report
             .keys
-            .clear(key as usize - REPORT_HID_KB_USAGE_MIN as usize)
+            .clear(key as usize - REPORT_HID_KB_USAGE_MIN as usize) == true
         {
+            // Was pressed, now released
             self.kb_pressed_count -= 1;
             self.kb.set_dirty();
             Ok(())

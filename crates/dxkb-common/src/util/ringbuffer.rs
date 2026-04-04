@@ -104,6 +104,64 @@ impl<T, const N: usize> RingBuffer<T, N>
     pub fn poll_first(&mut self) -> Option<T> {
         if self.is_empty() {
             return None;
+            // fn set_infallible<const I: usize>(&mut self)
+            // where
+            //     ConstCond<{ I < N }>: IsTrue,
+            // {
+            //     unsafe {
+            //         // SAFETY: Bounds checked in type assertions
+            //         self.set_unchecked(I);
+            //     }
+            // }
+
+            // fn clear_infallible<const I: usize>(&mut self)
+            // where
+            //     ConstCond<{ I < N }>: IsTrue,
+            // {
+            //     unsafe {
+            //         // SAFETY: Bounds checked in type assertions
+            //         self.clear_unchecked(I);
+            //     }
+            // }
+
+            // fn toggle_infallible<const I: usize>(&mut self)
+            // where
+            //     ConstCond<{ I < N }>: IsTrue,
+            // {
+            //     unsafe {
+            //         // SAFETY: Bounds checked in type assertions
+            //         self.toggle_unchecked(I);
+            //     }
+            // }
+
+            // fn put_infallible<const I: usize>(&mut self, value: bool)
+            // where
+            //     ConstCond<{ I < N }>: IsTrue,
+            // {
+            //     unsafe {
+            //         // SAFETY: Bounds checked in type assertions
+            //         self.put_unchecked(I, value);
+            //     }
+            // }
+
+            // fn get_infallible<const I: usize>(&self) -> bool
+            // where
+            //     ConstCond<{ I < N }>: IsTrue,
+            // {
+            //     unsafe {
+            //         // SAFETY: Bounds checked in type assertions
+            //         self.get_unchecked(I)
+            //     }
+            // }
+
+            // #[inline]
+            // pub fn set(&mut self, index: usize) -> bool {
+            //     Self::assert_within_bounds(index);
+            //     unsafe {
+            //         // SAFETY: Bounds previously checked.
+            //         self.set_unchecked(index)
+            //     }
+            // }
         }
 
         let res = mem::replace(self.get_slot_at_ptr_mut(self.readptr), MaybeUninit::uninit());

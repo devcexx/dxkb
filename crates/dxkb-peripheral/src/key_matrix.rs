@@ -339,8 +339,9 @@ where
         in_pins.make_input_pull_up();
         out_pins.make_output_push_pull();
 
-        in_pins.set_speed(Speed::High);
-        out_pins.set_speed(Speed::High);
+        // No hurries :)
+        in_pins.set_speed(Speed::Low);
+        out_pins.set_speed(Speed::Low);
 
         // Using active-low for determining whether matrix buttons are pressed,
         // so all the out pins are set to 1 until they're scanned, when
@@ -389,14 +390,15 @@ where
             self.output_pins.write_single(output_pin_index as u32, false);
             fence(Ordering::SeqCst);
 
-            // Wait a couple of cycles to let the gpio pin
-            // stabilize. I guess this should take around... 10 ns
-            // with OSPEEDR set to medium. So at 96 MHz, two dummy
-            // instructions are more than enough.
+            // Checked empirically that at 96 MHz with OSPEEDR set to low, it
+            // takes around 40 ns to go from High to Low.
             unsafe {
                 core::arch::asm! {
                     "nop",
-                    "nop"
+                    "nop",
+                    "nop",
+                    "nop",
+                    "nop",
                 };
             }
 
@@ -417,6 +419,7 @@ where
             self.input_pins.make_output_push_pull();
             self.input_pins.write_all(true);
             self.input_pins.make_input_pull_up();
+            fence(Ordering::SeqCst);
 
             // This section should be already enough to give some time to the column pin to go low.
             for input_pin_index in 0..S::InPins::NUM_PINS {

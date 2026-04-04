@@ -1,4 +1,4 @@
-use dxkb_common::{KeyState, dev_info, dev_warn};
+use dxkb_common::{KeyState, LogicalKeyState, dev_info, dev_warn};
 use hut::Consumer;
 use usbd_hid::descriptor::KeyboardUsage;
 
@@ -8,13 +8,14 @@ use crate::{
 };
 
 #[macro_export]
-macro_rules! do_on_key_state {
-    ($st:ident, $on_pressed:tt, $on_released:tt) => {
-        match $st {
-            ::dxkb_common::KeyState::Released => {
+macro_rules! do_on_key_state_ignore_masked {
+    ($old:ident, $new:ident, $on_pressed:tt, $on_released:tt) => {
+        match ($old, $new) {
+            (::dxkb_common::LogicalKeyState::PressedMasked, _) | (_, ::dxkb_common::LogicalKeyState::PressedMasked) => {}
+            (_, ::dxkb_common::LogicalKeyState::Released) => {
                 $on_released;
             }
-            ::dxkb_common::KeyState::Pressed => {
+            (_, ::dxkb_common::LogicalKeyState::Pressed) => {
                 $on_pressed;
             }
         }
@@ -24,9 +25,12 @@ macro_rules! do_on_key_state {
 pub fn standard_key_handle<S, Kb: SplitKeyboardLike<S>>(
     kb: &mut Kb,
     key: KeyboardUsage,
-    key_state: KeyState,
+    old_key_state: LogicalKeyState,
+    new_key_state: LogicalKeyState,
 ) {
-    do_on_key_state!(key_state, { kb.hid_mut().press_key(key) }, {
+    do_on_key_state_ignore_masked!(
+        old_key_state, new_key_state,
+        { kb.hid_mut().press_key(key) }, {
         kb.hid_mut().release_key(key)
     });
 }
@@ -34,10 +38,12 @@ pub fn standard_key_handle<S, Kb: SplitKeyboardLike<S>>(
 pub fn consumer_control_key_handle<S, Kb: SplitKeyboardLike<S>>(
     kb: &mut Kb,
     key: Consumer,
-    key_state: KeyState,
+    old_key_state: LogicalKeyState,
+    new_key_state: LogicalKeyState,
 ) {
-    do_on_key_state!(
-        key_state,
+    do_on_key_state_ignore_masked!(
+        old_key_state,
+        new_key_state,
         { kb.hid_mut().press_consumer_control_key(key) },
         { kb.hid_mut().release_consumer_control_key(key) }
     );
@@ -46,12 +52,14 @@ pub fn consumer_control_key_handle<S, Kb: SplitKeyboardLike<S>>(
 pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
     kb: &mut Kb,
     key: &BuiltinFunctionKey,
-    key_state: KeyState,
+    old_key_state: LogicalKeyState,
+    new_key_state: LogicalKeyState,
 ) {
     match key {
         BuiltinFunctionKey::PushNextLayer => {
-            do_on_key_state!(
-                key_state,
+            do_on_key_state_ignore_masked!(
+                old_key_state,
+                new_key_state,
                 {
                     let _ = kb.state_mut().push_next_layer();
                 },
@@ -59,8 +67,9 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::PushLayer(new) => {
-            do_on_key_state!(
-                key_state,
+            do_on_key_state_ignore_masked!(
+                old_key_state,
+                new_key_state,
                 {
                     let _ = kb.state_mut().push_layer_raw(*new);
                 },
@@ -68,8 +77,9 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::PopLayer => {
-            do_on_key_state!(
-                key_state,
+            do_on_key_state_ignore_masked!(
+                old_key_state,
+                new_key_state,
                 {
                     let _ = kb.state_mut().pop_layer_raw();
                 },
@@ -77,8 +87,9 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::PushNextLayerTransient => {
-            do_on_key_state!(
-                key_state,
+            do_on_key_state_ignore_masked!(
+                old_key_state,
+                new_key_state,
                 {
                     let _ = kb.state_mut().push_next_layer();
                 },
@@ -88,8 +99,9 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::PushLayerTransient(new) => {
-            do_on_key_state!(
-                key_state,
+            do_on_key_state_ignore_masked!(
+                old_key_state,
+                new_key_state,
                 {
                     let _ = kb.state_mut().push_layer_raw(*new);
                 },
@@ -99,8 +111,9 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::SetLayer(new) => {
-            do_on_key_state!(
-                key_state,
+            do_on_key_state_ignore_masked!(
+                old_key_state,
+                new_key_state,
                 {
                     let _ = kb.state_mut().request_layer_raw(*new);
                 },
@@ -110,8 +123,9 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::SetRelativeLayer(offset) => {
-            do_on_key_state!(
-                key_state,
+            do_on_key_state_ignore_masked!(
+                old_key_state,
+                new_key_state,
                 {
                     let state = kb.state_mut();
                     let current = state.requested_layer_raw();
@@ -123,8 +137,9 @@ pub fn function_key_handle<S: KeyboardStateLike, Kb: SplitKeyboardLike<S>>(
             );
         }
         BuiltinFunctionKey::SetRelativeLayerTransient(offset) => {
-            do_on_key_state!(
-                key_state,
+            do_on_key_state_ignore_masked!(
+                old_key_state,
+                new_key_state,
                 {
                     let state = kb.state_mut();
                     let current = state.requested_layer_raw();
@@ -207,18 +222,19 @@ impl HandleKey for DefaultKey {
         &self,
         kb: &mut Kb,
         _user: &mut Self::User,
-        key_state: KeyState,
+        old_state: LogicalKeyState,
+        new_state: LogicalKeyState,
     ) {
         match self {
             DefaultKey::NoOp => {}
             DefaultKey::Standard(keyboard_usage) => {
-                standard_key_handle(kb, *keyboard_usage, key_state);
+                standard_key_handle(kb, *keyboard_usage, old_state, new_state);
             }
             DefaultKey::Function(builtin_function_key) => {
-                function_key_handle(kb, builtin_function_key, key_state);
+                function_key_handle(kb, builtin_function_key, old_state, new_state);
             }
             DefaultKey::ConsumerControl(key) => {
-                consumer_control_key_handle(kb, *key, key_state);
+                consumer_control_key_handle(kb, *key, old_state, new_state);
             }
         }
     }
