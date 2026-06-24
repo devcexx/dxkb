@@ -71,6 +71,7 @@ impl<'a, B: UsbBus + 'a, O: DebugRead> UsbFeature<B> for DebugHidFeature<'a, B, 
     const EP: usize = 1;
     type TPoll = ();
 
+    // TODO
     fn endpoints_mut(&mut self) -> [&mut dyn usb_device::class::UsbClass<B>; Self::EP] {
         util::slice::array_unify_length(
           [&mut self.hid]

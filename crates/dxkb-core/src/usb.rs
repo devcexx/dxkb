@@ -1,5 +1,6 @@
 use core::mem::MaybeUninit;
 
+use dxkb_common::usize_add_n;
 use usb_device::{bus::UsbBus, class::UsbClass, device::UsbDevice};
 
 /**
@@ -29,11 +30,11 @@ pub trait UsbFeature<B: UsbBus> {
 
  macro_rules! endpoint_set_impl {
      ($($x:ident)*) => {
-         impl<B: UsbBus, $($x: UsbFeature<B>),*> UsbFeatureSet<B> for ($(&mut $x,)*) where [(); 0 $(+ $x::EP)*]: {
+         impl<B: UsbBus, $($x: UsbFeature<B>),*> UsbFeatureSet<B> for ($(&mut $x,)*) {
              type TPoll = ($($x::TPoll,)*);
 
              fn poll_all(&mut self, device: &mut UsbDevice<B>) -> Option<Self::TPoll> {
-                 let mut eps: [MaybeUninit<&mut dyn UsbClass<B>>; 0 $(+ $x::EP)*] = MaybeUninit::uninit().transpose();
+                 let mut eps: [MaybeUninit<&mut dyn UsbClass<B>>; usize_add_n!($({$x::EP}),*)] = MaybeUninit::uninit().transpose();
                  let mut i = 0;
                  $(
                      let $x = self.${index()}.endpoints_mut();
@@ -74,7 +75,7 @@ pub trait UsbFeature<B: UsbBus> {
      };
  }
 
-endpoint_set_impl!(1);
+//endpoint_set_impl!(1);
 endpoint_set_impl!(2);
-endpoint_set_impl!(3);
-endpoint_set_impl!(4);
+//endpoint_set_impl!(3);
+//endpoint_set_impl!(4);

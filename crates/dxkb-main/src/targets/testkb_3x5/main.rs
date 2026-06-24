@@ -13,8 +13,8 @@
 #![allow(static_mut_refs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(rustdoc::bare_urls)]
-#![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
+#![feature(generic_const_items, min_generic_const_args, generic_const_args)]
 
 mod keys;
 
@@ -23,6 +23,7 @@ use core::any::type_name;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 use dxkb_common::util::RingBuffer;
+use dxkb_common::util::matrix::MatrixShape;
 use dxkb_core::debug::{DebugHidFeature, NopDebugRead};
 use dxkb_core::hid::HidKeyboard;
 
@@ -30,7 +31,7 @@ use dxkb_common::bus::{BusPollError, BusTransferError, NullBus};
 use dxkb_common::dev_info;
 use dxkb_core::hid::ReportHidKeyboard;
 use dxkb_core::keyboard::{
-    KeyboardUsage, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLike, SplitKeyboardLinkMessage, SplitLayoutConfig
+    KeyboardShape, KeyboardUsage, LayoutShape, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLike, SplitKeyboardLinkMessage, SplitLayoutConfig, TKeyboardShape
 };
 use dxkb_core::keys::DefaultKey;
 use dxkb_core::log::RingBufferLogger;
@@ -72,16 +73,15 @@ use usb_device::LangID;
 use usb_device::bus::UsbBusAllocator;
 use usb_device::device::{StringDescriptors, UsbDeviceBuilder, UsbRev, UsbVidPid};
 
-// The total layers of the layout.
-const LAYERS: u8 = 2;
+// The size of a side of the keyboard
+type SideShape = MatrixShape<3, 5>;
 
-// The dimensions of each side of the keyboard.
-const SIDE_ROWS: u8 = 3;
-const SIDE_COLS: u8 = 5;
+// The shape of the keyboard layout. Includes the total size of both sides, and
+// the number of layers in the layout.
+type KbLayoutShape = LayoutShape<MatrixShape<3, 10>, 2>;
 
-// The total dimensions of the keyboard, including both sides.
-const LAYOUT_ROWS: u8 = SIDE_ROWS;
-const LAYOUT_COLS: u8 = 2 * SIDE_COLS;
+// The complete shape of the keyboard, including the layout shape and current side shape.
+type TestKeyboardShape = KeyboardShape<KbLayoutShape, SideShape>;
 
 type KeyMatrixRowPins = (
     DynamicPin<'B', 10>,
@@ -110,15 +110,13 @@ type UsbBusSensePin = Pin<'A', 9>;
 type SplitBusTxPin = Pin<'B', 6>;
 type SplitBusRxPin = Pin<'B', 7>;
 
-type KeyMatrixDebounce = DebouncerEagerPerKey<SIDE_ROWS, SIDE_COLS, 20>;
+type KeyMatrixDebounce = DebouncerEagerPerKey<SideShape, 20>;
 type KeyMatrixT = KeyMatrix<
-    SIDE_ROWS,
-    SIDE_COLS,
+    SideShape,
     KeyMatrixRowPins,
     KeyMatrixColPins,
     RowScan,
-    KeyMatrixDebounce,
-    ()
+    KeyMatrixDebounce
 >;
 
 type SplitBusUsart = USART1;
@@ -131,13 +129,9 @@ type SplitBusUart = UartDmaRb<FullDuplex<SplitBusUsart, SplitBusTxDmaStream, Spl
 type SplitBusT = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUart, DWTClock, 32>;
 
 type LayoutT =
-    SplitKeyboardLayout<KeyboardLayoutConfig, CustomKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
+    SplitKeyboardLayout<KeyboardLayoutConfig, CustomKey, <TestKeyboardShape as TKeyboardShape>::LayoutShape>;
 type KeyboardT<Hid> = SplitKeyboard<
-    LAYERS,
-    LAYOUT_ROWS,
-    LAYOUT_COLS,
-    SIDE_ROWS,
-    SIDE_COLS,
+    TestKeyboardShape,
     DWTClock,
     CurrentSide,
     Hid,

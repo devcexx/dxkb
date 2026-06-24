@@ -3,7 +3,7 @@ use core::{
     ops::Index,
 };
 
-use super::{ConstCond, IsTrue};
+use crate::util::gca::U8_AS_USIZE;
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -26,8 +26,6 @@ impl<const LENGTH: u8> Debug for BoundedU8<LENGTH> {
 }
 
 impl<const LENGTH: u8> BoundedU8<LENGTH>
-where
-    ConstCond<{ LENGTH > 0 }>: IsTrue,
 {
     pub const ZERO: BoundedU8<LENGTH> = BoundedU8(0);
 }
@@ -69,9 +67,7 @@ impl<const LENGTH: u8> BoundedU8<LENGTH> {
     }
 }
 
-impl<A, const LENGTH: u8> Index<BoundedU8<LENGTH>> for [A; LENGTH as usize]
-where
-    [(); LENGTH as usize]:,
+impl<A, const LENGTH: u8> Index<BoundedU8<LENGTH>> for [A; U8_AS_USIZE::<LENGTH>]
 {
     type Output = A;
 

@@ -1,5 +1,4 @@
 use core::marker::PhantomData;
-use dxkb_common::util::{ConstCond, IsTrue};
 use stm32f4xx_hal::gpio::{DynamicPin, Speed};
 use stm32f4xx_hal::pac::gpioa;
 use stm32f4xx_hal::pac::gpioa::otyper::OT0;
@@ -22,7 +21,6 @@ use stm32f4xx_hal::pac::gpioa::pupdr::PUPDR0;
  * different mode setting operations will ran, one for each port that composes
  * the set, regardless of the number of pins in each port.
  */
- #[diagnostic::on_unimplemented(asdf)]
 pub trait PinSet {
     const NUM_PINS: usize;
     const NUM_PORTS: usize;
@@ -39,7 +37,6 @@ pub trait PinSet {
     fn set_speed(&mut self, speed: Speed);
 }
 
- #[diagnostic::on_unimplemented(asdf)]
 pub trait PinSetSized<const NUM_PINS: usize>: PinSet {
 
 }

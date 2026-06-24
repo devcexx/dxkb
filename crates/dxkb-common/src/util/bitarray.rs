@@ -1,5 +1,8 @@
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
+const BIT_ARRAY_BUFSZ<const N: usize, const W: usize>: usize = 1 + ((N - 1) / (8 / W));
+type const T_BIT_ARRAY_BUFSZ<const N: usize, const W: usize>: usize = BIT_ARRAY_BUFSZ::<N, W>;
+
 pub trait FieldWidth {
     const BIT_WIDTH: usize;
     const _ASSERT_BIT_WIDTH_OK: () = assert!(Self::BIT_WIDTH > 0 && Self::BIT_WIDTH <= 8, "Invalid bit width");
@@ -57,22 +60,14 @@ impl FieldWidth for TwoBits {
     }
 }
 
-pub const fn bit_array_size<W: FieldWidth>(n: usize) -> usize {
-    1 + ((n - 1) / W::FIELDS_PER_BYTE)
-}
-
 #[repr(transparent)]
 #[derive(Clone, FromBytes, IntoBytes, Immutable, Debug)]
 pub struct BitArray<W: FieldWidth, const N: usize>
-where
-    [(); bit_array_size::<W>(N)]:,
 {
-    buf: [u8; bit_array_size::<W>(N)],
+    buf: [u8; T_BIT_ARRAY_BUFSZ::<N, {W::BIT_WIDTH}>],
 }
 
 impl <W: FieldWidth, const N: usize> Default for BitArray<W, N>
-where
-    [(); bit_array_size::<W>(N)]:,
 {
     fn default() -> Self {
         Self::new()
@@ -80,12 +75,10 @@ where
 }
 
 impl<W: FieldWidth, const N: usize> BitArray<W, N>
-where
-    [(); bit_array_size::<W>(N)]:,
 {
     pub const fn new() -> Self {
         Self {
-            buf: [0; bit_array_size::<W>(N)],
+            buf: [0; T_BIT_ARRAY_BUFSZ::<N, {W::BIT_WIDTH}>],
         }
     }
 

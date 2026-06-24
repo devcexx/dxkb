@@ -13,7 +13,6 @@
 #![allow(static_mut_refs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(rustdoc::bare_urls)]
-#![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
 
 mod config;

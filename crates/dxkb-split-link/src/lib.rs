@@ -42,7 +42,7 @@ Where:
 
 #![no_std]
 #![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
+#![feature(generic_const_items, min_generic_const_args, generic_const_args)]
 
 use core::fmt::Debug;
 use core::marker::PhantomData;
@@ -279,17 +279,7 @@ pub struct SplitBus<
     _timings: PhantomData<Ts>,
 }
 
-pub struct MaxFrameLength<Msg> {
-    _msg: PhantomData<Msg>,
-}
-
-impl<Msg> MaxFrameLength<Msg>
-where
-    Msg: Sized,
-{
-    const MAX_FRAME_LENGTH: usize = size_of::<Frame<Msg>>() + 1; // Max frame length plus the preamble byte.
-}
-
+const MAX_FRAME_LENGTH<M>: usize = size_of::<Frame<M>>() + 1; // Max frame length plus the preamble byte.
 // TODO Refactor code so that the code is based on the status of the link (like a state machine with actions on each transition and all that). (E.g move the code to an impl LinkStatus).
 impl<
     Msg: Clone + Debug + DeserializeOwned + Serialize,
@@ -298,9 +288,6 @@ impl<
     CS: Clock,
     const TX_QUEUE_LEN: usize,
 > SplitBus<Msg, Ts, B, CS, TX_QUEUE_LEN>
-where
-    [(); MaxFrameLength::<Msg>::MAX_FRAME_LENGTH]:,
-    [(); MaxFrameLength::<NoMsg>::MAX_FRAME_LENGTH]:,
 {
     pub fn new(bus: B, clock: CS, device_id: u128) -> Self {
         let cur = clock.current_instant();
@@ -579,7 +566,7 @@ where
     }
 
     fn do_rx<F: FnMut(&Msg) -> bool>(&mut self, mut recvf: F) {
-        let mut rxbuf = [0u8; { MaxFrameLength::<Msg>::MAX_FRAME_LENGTH }];
+        let mut rxbuf = [0u8; MAX_FRAME_LENGTH::<Msg>];
         while {
             let should_continue = match self.bus.poll_next(&mut rxbuf) {
                 Ok(frame_len) => {
@@ -624,10 +611,8 @@ where
         last_sent_frame_time: &mut CS::TInstant,
         frame: &FrameContentEnvelope<M>,
     ) -> Result<(), BusTransferError>
-    where
-        [(); MaxFrameLength::<M>::MAX_FRAME_LENGTH]:,
     {
-        let mut txbuf = [0u8; { MaxFrameLength::<M>::MAX_FRAME_LENGTH }];
+        let mut txbuf = [0u8; MAX_FRAME_LENGTH::<Msg>];
         let len = Self::encode_frame(&mut txbuf, frame);
         let res = bus.transfer(&mut txbuf[0..len]);
         if matches!(res, Ok(_)) {
@@ -733,9 +718,6 @@ impl<
     CS: Clock,
     const TX_QUEUE_LEN: usize,
 > SplitBusLike<Msg> for SplitBus<Msg, Ts, B, CS, TX_QUEUE_LEN>
-where
-    [(); MaxFrameLength::<Msg>::MAX_FRAME_LENGTH]:,
-    [(); MaxFrameLength::<NoMsg>::MAX_FRAME_LENGTH]:,
 {
     fn poll<F: FnMut(&Msg) -> bool>(&mut self, recvf: F) {
         self.do_rx(recvf);

@@ -501,6 +501,7 @@ impl<'a, B: UsbBus + 'a> UsbFeature<B> for ReportHidKeyboard<'a, B> {
     const EP: usize = 1;
     type TPoll = ();
 
+    //TODO
     fn endpoints_mut(&mut self) -> [&mut dyn usb_device::class::UsbClass<B>; Self::EP] {
         util::slice::array_unify_length(
           [&mut self.ep]
