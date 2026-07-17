@@ -1,7 +1,6 @@
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 const BIT_ARRAY_BUFSZ<const N: usize, const W: usize>: usize = 1 + ((N - 1) / (8 / W));
-type const T_BIT_ARRAY_BUFSZ<const N: usize, const W: usize>: usize = BIT_ARRAY_BUFSZ::<N, W>;
 
 pub trait FieldWidth {
     const BIT_WIDTH: usize;
@@ -64,7 +63,7 @@ impl FieldWidth for TwoBits {
 #[derive(Clone, FromBytes, IntoBytes, Immutable, Debug)]
 pub struct BitArray<W: FieldWidth, const N: usize>
 {
-    buf: [u8; T_BIT_ARRAY_BUFSZ::<N, {W::BIT_WIDTH}>],
+    buf: [u8; BIT_ARRAY_BUFSZ::<N, {W::BIT_WIDTH}>],
 }
 
 impl <W: FieldWidth, const N: usize> Default for BitArray<W, N>
@@ -78,7 +77,7 @@ impl<W: FieldWidth, const N: usize> BitArray<W, N>
 {
     pub const fn new() -> Self {
         Self {
-            buf: [0; T_BIT_ARRAY_BUFSZ::<N, {W::BIT_WIDTH}>],
+            buf: [0; BIT_ARRAY_BUFSZ::<N, {W::BIT_WIDTH}>],
         }
     }
 
