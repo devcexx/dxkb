@@ -313,8 +313,8 @@ fn main0() -> ! {
             unsafe {
                 let feature = USB_DEBUG_HANDLER.assume_init_mut();
                 let device = USB_DEVICE.assume_init_mut();
-                device.poll(&mut feature.endpoints_mut());
-                feature.usb_poll(device);
+                let r = device.poll(&mut feature.endpoints_mut());
+                feature.usb_poll(device, r);
             }
         },
         clk: clock.clone()

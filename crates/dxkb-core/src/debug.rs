@@ -78,7 +78,7 @@ impl<'a, B: UsbBus + 'a, O: DebugRead> UsbFeature<B> for DebugHidFeature<'a, B, 
         )
     }
 
-    fn usb_poll(&mut self, _device: &mut UsbDevice<B>) -> Self::TPoll {
+    fn usb_poll(&mut self, _device: &mut UsbDevice<B>, _changes: bool) -> Self::TPoll {
         if self.enter_bootloader {
             BootloaderUtil::enter_bootloader();
         }

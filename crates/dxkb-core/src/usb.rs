@@ -14,7 +14,7 @@ pub trait DynUsbDevice {
  */
 pub trait UsbFeatureSet<B: UsbBus> {
     type TPoll;
-    fn poll_all(&mut self, device: &mut UsbDevice<B>) -> Option<Self::TPoll>;
+    fn poll_all(&mut self, device: &mut UsbDevice<B>) -> Self::TPoll;
 }
 
 /**
@@ -30,7 +30,7 @@ pub trait UsbFeature<B: UsbBus> {
     /**
      * Function that must be called after polling the usb device and determining that changes are pending to be read from the usb device.
      */
-    fn usb_poll(&mut self, device: &mut UsbDevice<B>) -> Self::TPoll;
+    fn usb_poll(&mut self, device: &mut UsbDevice<B>, changes: bool) -> Self::TPoll;
     fn endpoints_mut(&mut self) -> [&mut dyn UsbClass<B>; Self::EP];
 }
 
@@ -39,7 +39,7 @@ pub trait UsbFeature<B: UsbBus> {
          impl<B: UsbBus, $($x: UsbFeature<B>),*> UsbFeatureSet<B> for ($(&mut $x,)*) {
              type TPoll = ($($x::TPoll,)*);
 
-             fn poll_all(&mut self, device: &mut UsbDevice<B>) -> Option<Self::TPoll> {
+             fn poll_all(&mut self, device: &mut UsbDevice<B>) -> Self::TPoll {
                  let mut eps: [MaybeUninit<&mut dyn UsbClass<B>>; usize_add_n!($({$x::EP}),*)] = MaybeUninit::uninit().transpose();
                  let mut i = 0;
                  $(
@@ -55,20 +55,15 @@ pub trait UsbFeature<B: UsbBus> {
                      eps.assume_init_mut()
                  };
 
-                 if device.poll(eps) {
-                     Some(
-                        (
-                         $(
-                             {
-                                 let $x = 0; // Dummy variable to be able to use metavars.
-                                 self.${index()}.usb_poll(device)
-                             }
-                         ,)*
-                        )
-                     )
-                 } else {
-                     None
-                 }
+                 let r = device.poll(eps);
+                 (
+                  $(
+                      {
+                          let $x = 0; // Dummy variable to be able to use metavars.
+                          self.${index()}.usb_poll(device, r)
+                      }
+                  ,)*
+                 )
              }
          }
      };

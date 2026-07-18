@@ -508,7 +508,11 @@ impl<'a, B: UsbBus + 'a> UsbFeature<B> for ReportHidKeyboard<'a, B> {
         )
     }
 
-    fn usb_poll(&mut self, device: &mut UsbDevice<B>) -> Self::TPoll {
+    fn usb_poll(&mut self, device: &mut UsbDevice<B>, changes: bool) -> Self::TPoll {
+        if !changes {
+            return;
+        }
+
         if self.remote_wakeup_enabled != device.remote_wakeup_enabled() {
             dev_debug!("Remote wakeup state change: {}", device.remote_wakeup_enabled());
         }
