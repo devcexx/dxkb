@@ -730,7 +730,7 @@ impl<K: HandleKey, LytShape: TLayoutShape>
         let old_state = self.matrix_state.put(Self::get_key_matrix_state_coord(real_row, real_col), LogicalKeyState::PressedMasked as u8);
         let old_state = LogicalKeyState::from_u8(old_state);
         if old_state == LogicalKeyState::Released {
-            dev_error!("Attempt to mask the released key ({}, {}). This MUST NOT happen!", real_row, real_col)
+            dev_error!("Attempt to mask the released key ({}, {}). This MUST NOT happen!", real_row, real_col);
         } else if old_state != LogicalKeyState::PressedMasked {
             dev_trace!("Key masked: ({}, {})", real_row, real_col);
         }

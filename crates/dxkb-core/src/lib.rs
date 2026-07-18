@@ -12,3 +12,4 @@ pub mod keys;
 pub mod log;
 pub mod usb;
 pub mod debug;
+pub mod usb_itm_panic_handler;

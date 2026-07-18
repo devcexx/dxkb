@@ -1,7 +1,13 @@
 use core::mem::MaybeUninit;
 
 use dxkb_common::usize_add_n;
-use usb_device::{bus::UsbBus, class::UsbClass, device::UsbDevice};
+use stm32f4xx_hal::otg_fs::USB;
+use usb_device::{bus::{UsbBus, UsbBusAllocator}, class::UsbClass, device::UsbDevice};
+
+pub trait DynUsbDevice {
+    fn force_reset(&mut self) -> usb_device::Result<()>;
+    fn poll(&mut self) -> bool;
+}
 
 /**
  * Represents a set of USB endpoints that can be polled together.
@@ -75,7 +81,7 @@ pub trait UsbFeature<B: UsbBus> {
      };
  }
 
-//endpoint_set_impl!(1);
+endpoint_set_impl!(1);
 endpoint_set_impl!(2);
-//endpoint_set_impl!(3);
-//endpoint_set_impl!(4);
+endpoint_set_impl!(3);
+endpoint_set_impl!(4);

@@ -19,7 +19,6 @@ cortex-m = { workspace = true }
 cortex-m-rt = { workspace = true }
 itm_logger = { workspace = true }
 log = { workspace = true }
-panic-itm = { workspace = true }
 ringbuffer = { workspace = true, default-features = false }
 seq-macro = { workspace = true }
 ssmarshal = { workspace = true, default-features = false }
