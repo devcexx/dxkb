@@ -33,7 +33,6 @@ impl HandleKey for CustomKey {
         match self {
             CustomKey::Default(default_key) => default_key.handle_key_state_change(kb, &mut (), old_state, new_state),
             CustomKey::Plus => {
-                panic!("Kaboom!");
                 let hid = kb.hid_mut();
                 do_on_key_state_ignore_masked!(old_state, new_state,
                     {
