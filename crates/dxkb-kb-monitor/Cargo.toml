@@ -1,0 +1,36 @@
+[package]
+name = "dxkb-kb-monitor"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "dxkb_kb_monitor_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dxkb-monitor"
+path = "src/services/monitor.rs"
+
+[[bin]]
+name = "dxkb-monitor-client"
+path = "src/services/user.rs"
+
+[dependencies]
+anyhow = { version = "1.0.103", features = ["backtrace"] }
+bilrost = "0.1015.0"
+bitcode = "0.6.9"
+clap = { version = "4.6.2", features = ["derive"] }
+env_logger = "0.11.11"
+futures = "0.3.33"
+libc = "0.2.186"
+log.workspace = true
+mio = "1.2.2"
+prost = "0.14.4"
+rand = "0.10.2"
+serde = { workspace = true, features = ["derive"] }
+tokio = { version = "1.53.0", features = ["full", "mio"] }
+tokio-scoped = "0.2.0"
+tokio-udev = "0.10.0"
+udev = { version = "0.9.3", features = ["mio10"] }
+unicode_escape = "0.1.0"
+zerocopy.workspace = true
