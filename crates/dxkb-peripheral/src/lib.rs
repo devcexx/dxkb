@@ -1,9 +1,9 @@
 #![no_std]
 #![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
 #![feature(const_trait_impl)]
 #![feature(const_index)]
 #![feature(macro_metavar_expr)]
+#![feature(generic_const_items, min_generic_const_args, generic_const_args)]
 
 use cortex_m::asm::bootload;
 use dxkb_common::dev_info;

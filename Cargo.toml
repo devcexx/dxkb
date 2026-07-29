@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/dxkb-common", "crates/dxkb-peripheral", "crates/dxkb-split-link", "crates/dxkb-main", "crates/dxkb-split-link-tester", "crates/dxkb-proc-macros", "crates/dxkb-lily58l-stemcell"]
+members = ["crates/dxkb-common", "crates/dxkb-peripheral", "crates/dxkb-split-link", "crates/dxkb-main", "crates/dxkb-split-link-tester", "crates/dxkb-proc-macros", "crates/dxkb-lily58l-stemcell", "crates/dxkb-kb-monitor"]
 
 #[features]
 #default = ["stm32f411", "dev-log"]
@@ -17,7 +17,6 @@ cortex-m-rt = "0.7.5"
 crc = "3.2.1"
 itm_logger = "0.1.2"
 log = "0.4.25"
-panic-itm = "0.4.2"
 ringbuffer = { version = "0.15.0", default-features = false }
 seq-macro = "0.3.5"
 serde = { version = "1.0.217", default-features = false, features = ["derive"] }

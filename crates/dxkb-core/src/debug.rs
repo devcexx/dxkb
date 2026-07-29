@@ -71,13 +71,14 @@ impl<'a, B: UsbBus + 'a, O: DebugRead> UsbFeature<B> for DebugHidFeature<'a, B, 
     const EP: usize = 1;
     type TPoll = ();
 
+    // TODO
     fn endpoints_mut(&mut self) -> [&mut dyn usb_device::class::UsbClass<B>; Self::EP] {
         util::slice::array_unify_length(
           [&mut self.hid]
         )
     }
 
-    fn usb_poll(&mut self, _device: &mut UsbDevice<B>) -> Self::TPoll {
+    fn usb_poll(&mut self, _device: &mut UsbDevice<B>, _changes: bool) -> Self::TPoll {
         if self.enter_bootloader {
             BootloaderUtil::enter_bootloader();
         }

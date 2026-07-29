@@ -13,8 +13,8 @@
 #![allow(static_mut_refs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(rustdoc::bare_urls)]
-#![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
+#![feature(generic_const_items, min_generic_const_args, generic_const_args)]
 
 mod config;
 mod layout;
@@ -23,7 +23,7 @@ use config::*;
 
 use cortex_m::interrupt::free;
 use dxkb_common::{LogicalKeyState, dev_info, util::RingBuffer};
-use dxkb_core::{debug::DebugHidFeature, do_on_key_state_ignore_masked, hid::HidKeyboard, keyboard::{HandleKey, KeyboardUsage, PinMasterSense}, log::RingBufferLogger};
+use dxkb_core::{debug::DebugHidFeature, do_on_key_state_ignore_masked, hid::HidKeyboard, keyboard::{HandleKey, KeyboardUsage, PinMasterSense}, log::RingBufferLogger, usb::UsbFeature, usb_itm_panic_handler::UsbItmPanicHandlerConfig};
 use core::any::type_name;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
@@ -34,7 +34,7 @@ use dxkb_core::keyboard::SplitKeyboardLike;
 use dxkb_peripheral::{clock::DWTClock, uart_dma_rb::HalfDuplexInitializer, BootloaderUtil, InterruptReceiver};
 
 #[allow(unused_imports)]
-use panic_itm as _;
+use dxkb_core::usb_itm_panic_handler;
 
 use cortex_m_rt::entry;
 use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, UartDmaRb};
@@ -50,7 +50,7 @@ use stm32f4xx_hal::{
     rcc::RccExt,
 };
 use synopsys_usb_otg::UsbBus;
-use usb_device::{class::UsbClass, device::{UsbDeviceBuilder, UsbRev}, LangID};
+use usb_device::{LangID, class::UsbClass, device::{UsbDevice, UsbDeviceBuilder, UsbRev}};
 use usb_device::bus::UsbBusAllocator;
 use usb_device::device::{StringDescriptors, UsbVidPid};
 
@@ -61,7 +61,10 @@ static mut SPLIT_BUS_DMA_TX_BUF: [u8; 256] = [0u8; 256];
 static mut KEYBOARD: MaybeUninit<TKeyboard> = MaybeUninit::uninit();
 static mut USB_ALLOC: MaybeUninit<UsbBusAllocator<UsbBus<USB>>> = MaybeUninit::uninit();
 
-static mut HID_LOGGER: RingBufferLogger<1024> = RingBufferLogger::new(log::Level::Trace, RingBuffer::new());
+static mut HID_LOGGER: RingBufferLogger<1024> = RingBufferLogger::new(log::Level::Trace, RingBuffer::new(), false);
+static mut USB_DEVICE: MaybeUninit<UsbDevice<UsbBus<USB>>> = MaybeUninit::uninit();
+static mut USB_DEBUG_HANDLER: MaybeUninit<DebugHidFeature<UsbBus<USB>, &'static RingBufferLogger<1024>>> = MaybeUninit::uninit();
+
 
 impl HandleKey for CustomKey {
     type User = KeyboardContext;
@@ -150,7 +153,6 @@ fn main0() -> ! {
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
 
-    //    itm_logger::init_with_level(log::Level::Trace).unwrap();
     RingBufferLogger::install(unsafe { &HID_LOGGER }).unwrap();
     dev_info!("Device startup. Device configuration:");
     dev_info!(" - Current Side: {:?}", type_name::<CurrentSide>());
@@ -170,7 +172,9 @@ fn main0() -> ! {
         USB_ALLOC.write(UsbBus::new(usb, addr_of_mut!(EP_MEMORY).as_mut().unwrap()))
     };
 
-    let mut usb_feature_debug = DebugHidFeature::new(usb_alloc, unsafe { &HID_LOGGER });
+    let mut usb_feature_debug = unsafe {
+        USB_DEBUG_HANDLER.write(DebugHidFeature::new(usb_alloc, &HID_LOGGER))
+    };
 
     let mut usb_feature_kb = ReportHidKeyboard::alloc(
         usb_alloc,
@@ -183,16 +187,36 @@ fn main0() -> ! {
     #[cfg(feature = "side-right")]
     let product = "STeMCell Lily58L (Right Side)";
 
-    let mut usb_dev =
-        UsbDeviceBuilder::new(usb_alloc, UsbVidPid(0x16c0, 0x27db))
-            .usb_rev(UsbRev::Usb200)
-            .supports_remote_wakeup(true)
-            .strings(&[StringDescriptors::new(LangID::ES)
-                .serial_number("0")
-                .manufacturer("devcexx")
-                .product(product)])
-            .unwrap()
-            .build();
+    let mut usb_dev = unsafe {
+        USB_DEVICE.write(
+            UsbDeviceBuilder::new(usb_alloc, UsbVidPid(0x16c0, 0x27db))
+                .usb_rev(UsbRev::Usb200)
+                .supports_remote_wakeup(true)
+                .strings(&[StringDescriptors::new(LangID::ES)
+                    .serial_number("0")
+                    .manufacturer("devcexx")
+                    .product(product)])
+                .unwrap()
+                .build()
+        )
+    };
+
+    usb_itm_panic_handler::setup(UsbItmPanicHandlerConfig {
+        usb_reset: &|| {
+            unsafe {
+                USB_DEVICE.assume_init_mut().force_reset();
+            }
+        },
+        usb_debug_poll: &|| {
+            unsafe {
+                let feature = USB_DEBUG_HANDLER.assume_init_mut();
+                let device = USB_DEVICE.assume_init_mut();
+                let r = device.poll(&mut feature.endpoints_mut());
+                feature.usb_poll(device, r);
+            }
+        },
+        clk: clock.clone()
+    });
 
     let matrix = init_key_matrix(
         (
@@ -264,8 +288,8 @@ fn main0() -> ! {
                 kb_context.plus_pending_press = false;
             }
         }
-        (kb.hid_mut(), &mut usb_feature_debug).poll_all(&mut usb_dev);
-        kb.poll(&mut kb_context, &mut usb_dev);
+        (kb.hid_mut(), &mut *usb_feature_debug).poll_all(&mut *usb_dev);
+        kb.poll(&mut kb_context, &mut *usb_dev);
     }
 }
 

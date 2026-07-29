@@ -1,8 +1,9 @@
 #![no_std]
+#![feature(generic_const_items, min_generic_const_args, generic_const_args)]
 #![feature(exhaustive_patterns)]
-#![feature(generic_const_exprs)]
 #![feature(const_trait_impl)]
 #![feature(const_convert)]
+#![feature(min_adt_const_params)]
 #![allow(incomplete_features)]
 
 

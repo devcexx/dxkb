@@ -13,8 +13,8 @@
 #![allow(static_mut_refs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(rustdoc::bare_urls)]
-#![feature(generic_const_exprs)]
 #![feature(macro_metavar_expr_concat)]
+#![feature(generic_const_items, min_generic_const_args, generic_const_args)]
 
 mod keys;
 
@@ -23,6 +23,7 @@ use core::any::type_name;
 use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 use dxkb_common::util::RingBuffer;
+use dxkb_common::util::matrix::MatrixShape;
 use dxkb_core::debug::{DebugHidFeature, NopDebugRead};
 use dxkb_core::hid::HidKeyboard;
 
@@ -30,7 +31,7 @@ use dxkb_common::bus::{BusPollError, BusTransferError, NullBus};
 use dxkb_common::dev_info;
 use dxkb_core::hid::ReportHidKeyboard;
 use dxkb_core::keyboard::{
-    KeyboardUsage, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLike, SplitKeyboardLinkMessage, SplitLayoutConfig
+    KeyboardShape, KeyboardUsage, LayoutShape, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLike, SplitKeyboardLinkMessage, SplitLayoutConfig, TKeyboardShape
 };
 use dxkb_core::keys::DefaultKey;
 use dxkb_core::log::RingBufferLogger;
@@ -44,13 +45,11 @@ use dxkb_common::bus::BusRead;
 use dxkb_peripheral::BootloaderUtil;
 use keys::{CustomKey, CustomKeyContext};
 use log::{info, Log, Record};
-#[allow(unused_imports)]
-use panic_itm as _;
 
 use cortex_m_rt::entry;
 use dxkb_peripheral::uart_dma_rb::{DmaRingBuffer, FullDuplex, FullDuplexInitializer, HalfDuplex, HalfDuplexInitializer, UartDmaRb};
 use dxkb_split_link::{SplitBus, TestingTimings};
-use dxkb_core::usb::UsbFeatureSet;
+use dxkb_core::usb::{UsbFeature, UsbFeatureSet};
 use ringbuffer::ConstGenericRingBuffer;
 use stm32f4xx_hal::dma::{Stream5, Stream7};
 use stm32f4xx_hal::gpio::alt::sys;
@@ -70,18 +69,18 @@ use stm32f4xx_hal::{
 use synopsys_usb_otg::UsbBus;
 use usb_device::LangID;
 use usb_device::bus::UsbBusAllocator;
-use usb_device::device::{StringDescriptors, UsbDeviceBuilder, UsbRev, UsbVidPid};
+use usb_device::device::{StringDescriptors, UsbDevice, UsbDeviceBuilder, UsbRev, UsbVidPid};
+use dxkb_core::usb_itm_panic_handler::{self, UsbItmPanicHandlerConfig};
 
-// The total layers of the layout.
-const LAYERS: u8 = 2;
+// The size of a side of the keyboard
+type SideShape = MatrixShape<3, 5>;
 
-// The dimensions of each side of the keyboard.
-const SIDE_ROWS: u8 = 3;
-const SIDE_COLS: u8 = 5;
+// The shape of the keyboard layout. Includes the total size of both sides, and
+// the number of layers in the layout.
+type KbLayoutShape = LayoutShape<MatrixShape<3, 10>, 2>;
 
-// The total dimensions of the keyboard, including both sides.
-const LAYOUT_ROWS: u8 = SIDE_ROWS;
-const LAYOUT_COLS: u8 = 2 * SIDE_COLS;
+// The complete shape of the keyboard, including the layout shape and current side shape.
+type TestKeyboardShape = KeyboardShape<KbLayoutShape, SideShape>;
 
 type KeyMatrixRowPins = (
     DynamicPin<'B', 10>,
@@ -110,15 +109,13 @@ type UsbBusSensePin = Pin<'A', 9>;
 type SplitBusTxPin = Pin<'B', 6>;
 type SplitBusRxPin = Pin<'B', 7>;
 
-type KeyMatrixDebounce = DebouncerEagerPerKey<SIDE_ROWS, SIDE_COLS, 20>;
+type KeyMatrixDebounce = DebouncerEagerPerKey<SideShape, 20>;
 type KeyMatrixT = KeyMatrix<
-    SIDE_ROWS,
-    SIDE_COLS,
+    SideShape,
     KeyMatrixRowPins,
     KeyMatrixColPins,
     RowScan,
-    KeyMatrixDebounce,
-    ()
+    KeyMatrixDebounce
 >;
 
 type SplitBusUsart = USART1;
@@ -131,13 +128,9 @@ type SplitBusUart = UartDmaRb<FullDuplex<SplitBusUsart, SplitBusTxDmaStream, Spl
 type SplitBusT = SplitBus<SplitKeyboardLinkMessage, TestingTimings, SplitBusUart, DWTClock, 32>;
 
 type LayoutT =
-    SplitKeyboardLayout<KeyboardLayoutConfig, CustomKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
+    SplitKeyboardLayout<KeyboardLayoutConfig, CustomKey, <TestKeyboardShape as TKeyboardShape>::LayoutShape>;
 type KeyboardT<Hid> = SplitKeyboard<
-    LAYERS,
-    LAYOUT_ROWS,
-    LAYOUT_COLS,
-    SIDE_ROWS,
-    SIDE_COLS,
+    TestKeyboardShape,
     DWTClock,
     CurrentSide,
     Hid,
@@ -154,8 +147,10 @@ static mut SPLIT_BUS_DMA_RX_BUF: DmaRingBuffer<256, 128> = DmaRingBuffer::new();
 static mut SPLIT_BUS_DMA_TX_BUF: [u8; 256] = [0u8; 256];
 static mut KEYBOARD: MaybeUninit<KeyboardT<ReportHidKeyboard<UsbBus<USB>>>> = MaybeUninit::uninit();
 static mut USB_ALLOC: MaybeUninit<UsbBusAllocator<UsbBus<USB>>> = MaybeUninit::uninit();
+static mut USB_DEVICE: MaybeUninit<UsbDevice<UsbBus<USB>>> = MaybeUninit::uninit();
+static mut USB_DEBUG_HANDLER: MaybeUninit<DebugHidFeature<UsbBus<USB>, &'static RingBufferLogger<1024>>> = MaybeUninit::uninit();
 
-static mut HID_LOGGER: RingBufferLogger<1024> = RingBufferLogger::new(log::Level::Trace, RingBuffer::new());
+static mut HID_LOGGER: RingBufferLogger<1024> = RingBufferLogger::new(log::Level::Trace, RingBuffer::new(), true);
 
 struct KeyboardLayoutConfig;
 impl SplitLayoutConfig for KeyboardLayoutConfig {
@@ -263,8 +258,7 @@ fn main0() -> ! {
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
 
-    itm_logger::init_with_level(log::Level::Trace).unwrap();
-    //RingBufferLogger::install(unsafe { &HID_LOGGER }).unwrap();
+    RingBufferLogger::install(unsafe { &HID_LOGGER }).unwrap();
 
     dev_info!("Device startup. Device configuration:");
     dev_info!(" - Current Side: {:?}", type_name::<CurrentSide>());
@@ -291,18 +285,40 @@ fn main0() -> ! {
         1
     );
 
-    let mut usb_feature_debug = DebugHidFeature::new(usb_alloc, unsafe { &HID_LOGGER });
+    let mut usb_feature_debug = unsafe {
+        USB_DEBUG_HANDLER.write(DebugHidFeature::new(usb_alloc, unsafe { &HID_LOGGER }))
+    };
 
-    let mut usb_dev =
-        UsbDeviceBuilder::new(usb_alloc, UsbVidPid(0x16c0, 0x27db))
-            .usb_rev(UsbRev::Usb200)
-            .supports_remote_wakeup(true)
-            .strings(&[StringDescriptors::new(LangID::ES)
-                .serial_number("0")
-                .manufacturer("devcexx")
-                .product("dxkb testkb_3x5")])
-            .unwrap()
-            .build();
+    let mut usb_dev = unsafe {
+        USB_DEVICE.write(
+            UsbDeviceBuilder::new(usb_alloc, UsbVidPid(0x16c0, 0x27db))
+                .usb_rev(UsbRev::Usb200)
+                .supports_remote_wakeup(true)
+                .strings(&[StringDescriptors::new(LangID::ES)
+                    .serial_number("0")
+                    .manufacturer("devcexx")
+                    .product("dxkb testkb_3x5")])
+                .unwrap()
+                .build()
+        )
+    };
+
+    usb_itm_panic_handler::setup(UsbItmPanicHandlerConfig {
+        usb_reset: &|| {
+            unsafe {
+                USB_DEVICE.assume_init_mut().force_reset();
+            }
+        },
+        usb_debug_poll: &|| {
+            unsafe {
+                let feature = USB_DEBUG_HANDLER.assume_init_mut();
+                let device = USB_DEVICE.assume_init_mut();
+                let r = device.poll(&mut feature.endpoints_mut());
+                feature.usb_poll(device, r);
+            }
+        },
+        clk: clock.clone()
+    });
 
     let matrix = init_key_matrix(
         (
@@ -360,7 +376,7 @@ fn main0() -> ! {
             }
         }
 
-        (kb.hid_mut(), &mut usb_feature_debug).poll_all(&mut usb_dev);
+        (kb.hid_mut(), &mut *usb_feature_debug).poll_all(&mut usb_dev);
         kb.poll(&mut key_context, &mut usb_dev);
     }
 }

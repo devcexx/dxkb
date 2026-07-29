@@ -1,4 +1,4 @@
-use super::{ConstCond, IsTrue};
+use crate::util::{Assert, gca::SIZE_OF};
 
 /// Marks a type as it is possible to be constructed from an arbitrary byte
 /// array. The implementation of this trait is unsafe because the implementing
@@ -20,11 +20,15 @@ pub unsafe trait FromBytesSized: Sized {
     }
 }
 
+const ASSERT_GEQ<const N: usize, const SIZE: usize>: () = const {
+    assert!(N >= SIZE, "Array size must be greater or equal than type size");
+};
+
 pub trait FromByteArray {
     fn ref_from_byte_array<'a, const N: usize>(arr: &'a [u8; N]) -> &'a Self
     where
         Self: FromBytesSized,
-        ConstCond<{ N >= Self::SELF_SIZE }>: IsTrue,
+        Assert<{ASSERT_GEQ::<N, {SIZE_OF::<Self>}>}>:
     {
         unsafe {
             let ptr = Self::from_raw_ptr(arr.as_ptr());
@@ -35,7 +39,7 @@ pub trait FromByteArray {
     fn mut_from_byte_array<'a, const N: usize>(arr: &'a mut [u8; N]) -> &'a mut Self
     where
         Self: FromBytesSized,
-        ConstCond<{ N >= Self::SELF_SIZE }>: IsTrue,
+        Assert<{ASSERT_GEQ::<N, {SIZE_OF::<Self>}>}>:
     {
         unsafe {
             let ptr = Self::from_raw_ptr_mut(arr.as_mut_ptr());
@@ -46,7 +50,7 @@ pub trait FromByteArray {
     fn from_byte_array<'a, const N: usize>(arr: &'a [u8; N]) -> Self
     where
         Self: FromBytesSized,
-        ConstCond<{ N >= Self::SELF_SIZE }>: IsTrue,
+        Assert<{ASSERT_GEQ::<N, {SIZE_OF::<Self>}>}>:
     {
         unsafe { core::mem::transmute_copy(&*Self::from_raw_ptr(arr.as_ptr())) }
     }

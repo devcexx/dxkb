@@ -1,19 +1,27 @@
-use dxkb_core::{hid::ReportHidKeyboard, keyboard::{Left, Right, PinMasterSense, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig}, keys::DefaultKey};
+use dxkb_common::util::matrix::{MATRIX_COLS, MATRIX_ROWS, MatrixShape};
+use dxkb_core::{hid::ReportHidKeyboard, keyboard::{self, KeyboardShape, Left, PinMasterSense, Right, SplitKeyboard, SplitKeyboardLayout, SplitKeyboardLinkMessage, SplitLayoutConfig}, keys::DefaultKey};
 use dxkb_peripheral::{clock::DWTClock, key_matrix::{DebouncerEagerPerKey, KeyMatrix, RowScan}, uart_dma_rb::{HalfDuplex, UartDmaRb}};
 use dxkb_split_link::{DefaultSplitLinkTimings, SplitBus};
 use stm32f4xx_hal::{dma::{Stream5, Stream6, Stream7}, gpio::{DynamicPin, Input, Output, Pin, PushPull}, otg_fs::USB, pac::{DMA1, DMA2, USART1, USART2}, signature::Uid};
 use synopsys_usb_otg::UsbBus;
 
-// The total layers of the layout.
-const LAYERS: u8 = 4;
+// The shape of the current side
+type SideShape = MatrixShape<
+    // rows
+    5,
 
-// The dimensions of each side of the keyboard.
-const SIDE_ROWS: u8 = 5;
-const SIDE_COLS: u8 = 6;
+    // cols
+    6
+>;
 
-// The total dimensions of the keyboard, including both sides.
-const LAYOUT_ROWS: u8 = SIDE_ROWS;
-const LAYOUT_COLS: u8 = 2 * SIDE_COLS;
+// The shape of the layout, including the complete dimensions of the keyboard,
+// considering both sides, and the layer count.
+type LayoutShape = keyboard::LayoutShape<
+    MatrixShape<{MATRIX_ROWS::<SideShape>}, {MATRIX_COLS::<SideShape> * 2}>,
+    // layer count
+    4
+>;
+type KbShape = KeyboardShape<LayoutShape, SideShape>;
 
 const DEBOUNCE_MILLIS: u8 = 20;
 
@@ -45,9 +53,6 @@ pub type KeyMatrixColPins = (
     DynamicPin<'B', 1>,
 );
 
-
-
-// TODO
 pub type UsbBusSensePin = Pin<'A', 9>;
 
 pub type SplitBusTxRxPin = Pin<'A', 2>;
@@ -60,25 +65,19 @@ pub type SplitBusRxDmaStream = Stream5<SplitBusDmaPeripheral>;
 pub type SplitBusUsart = UartDmaRb<HalfDuplex<SplitBusUsartPort, SplitBusTxDmaStream, SplitBusRxDmaStream, 4, 4>, 256, 256, 128>;
 pub type TSplitBus = SplitBus<SplitKeyboardLinkMessage, DefaultSplitLinkTimings, SplitBusUsart, DWTClock, 32>;
 
-pub type TKeyMatrixDebounce = DebouncerEagerPerKey<SIDE_ROWS, SIDE_COLS, DEBOUNCE_MILLIS>;
+pub type TKeyMatrixDebounce = DebouncerEagerPerKey<SideShape, DEBOUNCE_MILLIS>;
 pub type TKeyMatrix = KeyMatrix<
-    SIDE_ROWS,
-    SIDE_COLS,
+    SideShape,
     KeyMatrixRowPins,
     KeyMatrixColPins,
     RowScan,
-    TKeyMatrixDebounce,
-    ()
+    TKeyMatrixDebounce
 >;
 
-pub type TLayout = SplitKeyboardLayout<KeyboardLayoutConfig, CustomKey, LAYERS, LAYOUT_ROWS, LAYOUT_COLS>;
+pub type TLayout = SplitKeyboardLayout<KeyboardLayoutConfig, CustomKey, LayoutShape>;
 
 pub type TKeyboard<'b> = SplitKeyboard<
-    LAYERS,
-    LAYOUT_ROWS,
-    LAYOUT_COLS,
-    SIDE_ROWS,
-    SIDE_COLS,
+    KbShape,
     DWTClock,
     CurrentSide,
     ReportHidKeyboard<'b, UsbBus<USB>>,
@@ -92,7 +91,7 @@ pub type TKeyboard<'b> = SplitKeyboard<
 
 pub struct KeyboardLayoutConfig;
 impl SplitLayoutConfig for KeyboardLayoutConfig {
-    const SPLIT_RIGHT_COL_OFFSET: u8 = SIDE_COLS;
+    const SPLIT_RIGHT_COL_OFFSET: u8 = MATRIX_COLS::<SideShape>;
 }
 
 

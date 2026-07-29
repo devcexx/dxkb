@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
 use dxkb_common::{
-    KeyState, LogicalKeyState, dev_error, dev_info, dev_trace, dev_warn, time::Clock, util::{BitArray, BitMatrix, BitMatrixLayout, BoundedU8, ColBitMatrixLayout, ConstCond, IsTrue, TwoBits}
+    KeyState, LogicalKeyState, dev_error, dev_info, dev_trace, dev_warn, time::Clock, util::{Assert, BitArray, BoundedU8, TwoBits, gca::U8_AS_USIZE, matrix::{MATRIX_COLS, MATRIX_ROWS, MATRIX_SIZE_USIZE, TMatrixShape}}
 };
 use dxkb_peripheral::{key_matrix::KeyMatrixLike, usb::UsbRemoteWakeup};
 use dxkb_split_link::SplitBusLike;
@@ -113,44 +113,85 @@ pub trait SplitKeyboardLike<State> {
     fn hid_mut(&mut self) -> &mut Self::Hid;
 }
 
+const LAYOUT_VALID_ASSERT<const LAYERS: u8>: () = const {
+    assert!(LAYERS > 0, "Layout must have at least one layer");
+};
 
-pub const fn matrix_size(rows: u8, cols: u8) -> usize {
-    rows as usize * cols as usize
+pub struct LayoutShape<Shape: TMatrixShape, const LAYERS: u8>
+where Assert<{LAYOUT_VALID_ASSERT::<LAYERS>}>: {
+    _shape: PhantomData<Shape>,
+}
+impl <M: TMatrixShape, const LAYERS: u8> LayoutShape<M, LAYERS> {}
+
+pub trait TLayoutShape: TMatrixShape {
+    type MatrixShape: TMatrixShape;
+    const LAYERS: u8;
 }
 
-// This is so horrible, fuck const generics :/
-macro_rules! valid_matrix_size {
-    ($rows:ident, $cols:ident) => {
-        ::dxkb_common::util::bit_array_size::<::dxkb_common::util::TwoBits>(matrix_size($rows, $cols))
-    };
+impl <Shape: TMatrixShape, const LAYERS: u8> TLayoutShape for LayoutShape<Shape, LAYERS> {
+    const LAYERS: u8 = LAYERS;
+    type MatrixShape = Shape;
 }
+
+impl <Shape: TMatrixShape, const LAYERS: u8> TMatrixShape for LayoutShape<Shape, LAYERS> {
+    const ROWS: u8 = Shape::ROWS;
+    const COLS: u8 = Shape::COLS;
+}
+
+const KEYBOARD_SHAPE_VALID_ASSERT<LayoutShape: TLayoutShape, SideShape: TMatrixShape>: () = const {
+    assert!(
+        LayoutShape::ROWS >= SideShape::ROWS,
+        "Layout rows cannot be smaller than the number of rows in the current side matrix"
+    );
+    assert!(
+        LayoutShape::COLS >= SideShape::COLS,
+        "Layout cols cannot be smaller than the number of cols in the current side matrix"
+    );
+};
+
+pub struct KeyboardShape<LayoutShape: TLayoutShape, SideShape: TMatrixShape>
+where Assert<{KEYBOARD_SHAPE_VALID_ASSERT::<LayoutShape, SideShape>}>: {
+    _layout_shape: PhantomData<LayoutShape>,
+    _matrix_shape: PhantomData<SideShape>,
+}
+
+pub trait TKeyboardShape {
+    type LayoutShape: TLayoutShape;
+    type SideShape: TMatrixShape;
+}
+
+impl <LayoutShape: TLayoutShape, SideShape: TMatrixShape> TKeyboardShape for KeyboardShape<LayoutShape, SideShape> {
+    type LayoutShape = LayoutShape;
+    type SideShape = SideShape;
+}
+
+pub const LAYOUT_LAYERS<Layout: TLayoutShape>: u8 = Layout::LAYERS;
+
+pub const KB_SIDE_ROWS<KeyboardShape: TKeyboardShape>: u8 = MATRIX_ROWS::<KeyboardShape::SideShape>;
+pub const KB_SIDE_COLS<KeyboardShape: TKeyboardShape>: u8 = MATRIX_COLS::<KeyboardShape::SideShape>;
+
+pub const KB_LAYOUT_ROWS<KeyboardShape: TKeyboardShape>: u8 = MATRIX_ROWS::<KeyboardShape::LayoutShape>;
+pub const KB_LAYOUT_COLS<KeyboardShape: TKeyboardShape>: u8 = MATRIX_COLS::<KeyboardShape::LayoutShape>;
+pub const KB_LAYOUT_LAYERS<KeyboardShape: TKeyboardShape>: u8 = LAYOUT_LAYERS::<KeyboardShape::LayoutShape>;
+
 
 pub struct SplitKeyboard<
-    const LLAYERS: u8,
-    const LROWS: u8,
-    const LCOLS: u8,
-    const MROWS: u8,
-    const MCOLS: u8,
+    KbShape: TKeyboardShape,
     Clk: Clock,
     Side: SplitKeyboardSideType,
     Hid: HidKeyboard,
-    LayoutConfig: SplitLayoutConfig,
+    LayoutConfig: SplitLayoutConfig, // TODO This probably should be part of the keyboard shape right?
     Key: HandleKey,
-    Matrix: KeyMatrixLike<MROWS, MCOLS>,
+    Matrix: KeyMatrixLike<KbShape::SideShape>,
     MasterTester: MasterCheck,
     SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
     User,
-> where
-    [(); LLAYERS as usize]:,
-    [(); LCOLS as usize]:,
-    [(); LROWS as usize]:,
-    [(); valid_matrix_size!(LROWS, LCOLS)]:,
-    ConstCond<{ LLAYERS > 0 }>: IsTrue,
+>
 {
     clock: Clk,
     matrix: Matrix,
-    layout: SplitKeyboardLayout<LayoutConfig, Key, LLAYERS, LROWS, LCOLS>,
-    state: KeyboardState<Key, LLAYERS, LROWS, LCOLS>,
+    layout: SplitKeyboardLayout<LayoutConfig, Key, KbShape::LayoutShape>,
+    state: KeyboardState<Key, KbShape::LayoutShape>,
     pub split_bus: SplitBus,
     master_tester: MasterTester,
     is_master: bool,
@@ -164,11 +205,7 @@ pub struct SplitKeyboard<
 }
 
 impl<
-    const LLAYERS: u8,
-    const LROWS: u8,
-    const LCOLS: u8,
-    const MROWS: u8,
-    const MCOLS: u8,
+    KbShape: TKeyboardShape,
     Clk: Clock,
     CurSide,
     Hid,
@@ -180,11 +217,7 @@ impl<
     User,
 >
     SplitKeyboard<
-        LLAYERS,
-        LROWS,
-        LCOLS,
-        MROWS,
-        MCOLS,
+        KbShape,
         Clk,
         CurSide,
         Hid,
@@ -202,35 +235,18 @@ where
     Hid: HidKeyboard,
     LayoutConfig: SplitLayoutConfig,
     Key: HandleKey<User = User>,
-    Matrix: KeyMatrixLike<MROWS, MCOLS>,
+    Matrix: KeyMatrixLike<KbShape::SideShape>,
     MasterTester: MasterCheck,
     SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
-    [(); LLAYERS as usize]:,
-    [(); LCOLS as usize]:,
-    [(); LROWS as usize]:,
-    [(); valid_matrix_size!(LROWS, LCOLS)]:,
-    ConstCond<{ LLAYERS > 0 }>: IsTrue,
 {
-    const fn assert_config_ok() {
-        assert!(
-            LROWS >= MROWS,
-            "Layout rows cannot be smaller than the number of rows in the current side matrix"
-        );
-        assert!(
-            LCOLS >= MCOLS,
-            "Layout cols cannot be smaller than the number of cols in the current side matrix"
-        );
-    }
-
     pub fn new(
         clock: Clk,
         hid: Hid,
-        layout: SplitKeyboardLayout<LayoutConfig, Key, LLAYERS, LROWS, LCOLS>,
+        layout: SplitKeyboardLayout<LayoutConfig, Key, KbShape::LayoutShape>,
         matrix: Matrix,
         split_bus: SplitBus,
         master_tester: MasterTester,
     ) -> Self {
-        const { Self::assert_config_ok() }
         Self {
             clock,
             hid,
@@ -285,8 +301,8 @@ where
         let mut pending_pressed = self.state.pressed_key_count;
         if self.state.requested_layer != self.state.current_layer {
             dev_trace!("Start layer sync. Pressed keys: {}", pending_pressed);
-            for row in 0..LROWS {
-                for col in 0..LCOLS {
+            for row in 0..KbShape::LayoutShape::ROWS {
+                for col in 0..KbShape::LayoutShape::COLS {
                     if pending_pressed == 0 {
                         break;
                     }
@@ -341,8 +357,8 @@ where
             // to the layout bit matrix, making sure we only override
             // the bits from the current side of the keyboard. For
             // now following a naive implementation.
-            for row in 0..MROWS {
-                for col in 0..MCOLS {
+            for row in 0..KbShape::SideShape::ROWS {
+                for col in 0..KbShape::SideShape::COLS {
                     self.layout_update_key_state::<CurSide>(
                         row,
                         col,
@@ -451,11 +467,7 @@ where
 }
 
 impl<
-    const LLAYERS: u8,
-    const LROWS: u8,
-    const LCOLS: u8,
-    const MROWS: u8,
-    const MCOLS: u8,
+    KbShape: TKeyboardShape,
     Clk,
     CurSide,
     Hid,
@@ -465,13 +477,9 @@ impl<
     MasterTester,
     SplitBus,
     User,
-> SplitKeyboardLike<KeyboardState<Key, LLAYERS, LROWS, LCOLS>>
+> SplitKeyboardLike<KeyboardState<Key, KbShape::LayoutShape>>
     for SplitKeyboard<
-        LLAYERS,
-        LROWS,
-        LCOLS,
-        MROWS,
-        MCOLS,
+        KbShape,
         Clk,
         CurSide,
         Hid,
@@ -489,19 +497,14 @@ where
     Hid: HidKeyboard,
     LayoutConfig: SplitLayoutConfig,
     Key: HandleKey<User = User>,
-    Matrix: KeyMatrixLike<MROWS, MCOLS>,
+    Matrix: KeyMatrixLike<KbShape::SideShape>,
     MasterTester: MasterCheck,
-    SplitBus: SplitBusLike<SplitKeyboardLinkMessage>,
-    [(); LLAYERS as usize]:,
-    [(); LCOLS as usize]:,
-    [(); LROWS as usize]:,
-    [(); valid_matrix_size!(LROWS, LCOLS)]:,
-    ConstCond<{ LLAYERS > 0 }>: IsTrue,
+    SplitBus: SplitBusLike<SplitKeyboardLinkMessage>
 {
     type User = User;
     type Hid = Hid;
 
-    fn state_mut(&mut self) -> &mut KeyboardState<Key, LLAYERS, LROWS, LCOLS> {
+    fn state_mut(&mut self) -> &mut KeyboardState<Key, KbShape::LayoutShape> {
         &mut self.state
     }
 
@@ -532,49 +535,36 @@ impl<Config: SplitLayoutConfig> SideLayoutOffset<Config> for Right {
 
 #[repr(transparent)]
 pub struct LayerRow<Key, const COLS: u8>
-where
-    [(); COLS as usize]:,
 {
-    row: [Key; COLS as usize],
+    row: [Key; U8_AS_USIZE::<COLS>],
 }
 
 impl<Key, const COLS: u8> LayerRow<Key, COLS>
-where
-    [(); COLS as usize]:,
 {
-    pub const fn new(row: [Key; COLS as usize]) -> Self {
+    pub const fn new(row: [Key; U8_AS_USIZE::<COLS>]) -> Self {
         Self { row }
     }
 
-    pub fn new_from(row: [impl Into<Key>; COLS as usize]) -> Self {
+    pub fn new_from(row: [impl Into<Key>; U8_AS_USIZE::<COLS>]) -> Self {
         Self {
             row: row.map(|e| e.into()),
         }
     }
 }
 
-pub struct LayoutLayer<Key, const ROWS: u8, const COLS: u8>
-where
-    [(); COLS as usize]:,
-    [(); ROWS as usize]:,
+pub struct LayoutLayer<Key, Shape: TMatrixShape>
 {
-    keys: [LayerRow<Key, COLS>; ROWS as usize],
+    keys: [LayerRow<Key, {MATRIX_COLS::<Shape>}>; U8_AS_USIZE::<{MATRIX_ROWS::<Shape>}>],
 }
 
-impl<Key, const ROWS: u8, const COLS: u8> LayoutLayer<Key, ROWS, COLS>
-where
-    [(); COLS as usize]:,
-    [(); ROWS as usize]:,
+impl<Key, Shape: TMatrixShape> LayoutLayer<Key, Shape>
 {
-    pub const fn new(keys: [LayerRow<Key, COLS>; ROWS as usize]) -> Self {
+    pub const fn new(keys: [LayerRow<Key, {MATRIX_COLS::<Shape>}>; U8_AS_USIZE::<{MATRIX_ROWS::<Shape>}>]) -> Self {
         Self { keys }
     }
 }
 
-impl<Key, const ROWS: u8, const COLS: u8> LayoutLayer<Key, ROWS, COLS>
-where
-    [(); COLS as usize]:,
-    [(); ROWS as usize]:,
+impl<Key, Shape: TMatrixShape> LayoutLayer<Key, Shape>
 {
     fn get_key_definition(&self, row: u8, col: u8) -> &Key {
         &self.keys[row as usize].row[col as usize]
@@ -636,17 +626,10 @@ pub trait KeyboardStateLike {
     fn requested_layer_raw(&self) -> u8;
 }
 
-pub struct KeyboardState<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8>
-where
-    [(); ROWS as usize]:,
-    [(); LAYERS as usize]:,
-    [(); COLS as usize]:,
-    [(); ROWS as usize]:,
-    [(); valid_matrix_size!(ROWS, COLS)]:,
-    ConstCond<{ LAYERS > 0 }>: IsTrue,
+pub struct KeyboardState<K: HandleKey, LytShape: TLayoutShape>
 {
     // Once the stack gets full, it will smash the last recent entry to make room for the new one.
-    layers_stack: Vec<BoundedU8<LAYERS>, 8>,
+    layers_stack: Vec<BoundedU8<{LAYOUT_LAYERS::<LytShape>}>, 8>,
 
     // TODO We could have a list of keys pressed here, that indicates the exact
     // keys that are pressed, and prevent any duplicated press if a given key is
@@ -656,10 +639,10 @@ where
     /// The matrix holding the states of each key. This matrix holds not only
     /// the local pressed keys, like the key matrix controller, but also the
     /// states of the remote peer side, when working as master.
-    matrix_state: BitArray<TwoBits, {matrix_size(ROWS, COLS)}>,
+    matrix_state: BitArray<TwoBits, {MATRIX_SIZE_USIZE::<LytShape::MatrixShape>}>,
 
     /// The current layer selected, that will receive the keyboard events
-    current_layer: BoundedU8<LAYERS>,
+    current_layer: BoundedU8<{LAYOUT_LAYERS::<LytShape>}>,
 
     /// The requested layer to become the current one. Keys should request a new
     /// layer by updating this value. Then, it is responsability of the keyboard
@@ -668,27 +651,21 @@ where
     /// transition between both layers. When the value of [`requested_layer`],
     /// matches [`current_layer`], it means that no layer change has been
     /// requested.
-    requested_layer: BoundedU8<LAYERS>,
+    requested_layer: BoundedU8<{LAYOUT_LAYERS::<LytShape>}>,
 
     /// The number of logical keys pressed right now.
     pressed_key_count: u8,
     _phantom: PhantomData<K>,
 }
 
-impl<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8>
-    KeyboardState<K, LAYERS, ROWS, COLS>
-where
-    [(); LAYERS as usize]:,
-    [(); COLS as usize]:,
-    [(); ROWS as usize]:,
-    [(); valid_matrix_size!(ROWS, COLS)]:,
-    ConstCond<{ LAYERS > 0 }>: IsTrue,
+impl<K: HandleKey, LytShape: TLayoutShape>
+    KeyboardState<K, LytShape>
 {
     pub const fn new() -> Self {
         Self {
             layers_stack: Vec::new(),
             // do NOT allow this to try to infer types, otherwise Rust compiler could throw an ICE.
-            matrix_state: BitArray::<TwoBits, {matrix_size(ROWS, COLS)}>::new(),
+            matrix_state: BitArray::<TwoBits, {MATRIX_SIZE_USIZE::<LytShape::MatrixShape>}>::new(),
             current_layer: BoundedU8::ZERO,
             requested_layer: BoundedU8::ZERO,
             _phantom: PhantomData,
@@ -698,10 +675,10 @@ where
 
     #[inline(always)]
     const fn get_key_matrix_state_coord(row: u8, col: u8) -> usize {
-        return row as usize * COLS as usize + col as usize
+        return row as usize * LytShape::COLS as usize + col as usize
     }
 
-    fn validate_requested_layer(layer: u8) -> Option<BoundedU8<LAYERS>> {
+    fn validate_requested_layer(layer: u8) -> Option<BoundedU8<{LAYOUT_LAYERS::<LytShape>}>> {
         let ret = BoundedU8::from_value(layer);
         if ret.is_none() {
             dev_warn!("Requested layer out of bounds: {}", layer);
@@ -753,7 +730,7 @@ where
         let old_state = self.matrix_state.put(Self::get_key_matrix_state_coord(real_row, real_col), LogicalKeyState::PressedMasked as u8);
         let old_state = LogicalKeyState::from_u8(old_state);
         if old_state == LogicalKeyState::Released {
-            dev_error!("Attempt to mask the released key ({}, {}). This MUST NOT happen!", real_row, real_col)
+            dev_error!("Attempt to mask the released key ({}, {}). This MUST NOT happen!", real_row, real_col);
         } else if old_state != LogicalKeyState::PressedMasked {
             dev_trace!("Key masked: ({}, {})", real_row, real_col);
         }
@@ -765,12 +742,12 @@ where
         LogicalKeyState::from_u8(self.matrix_state.get(Self::get_key_matrix_state_coord(row, col)))
     }
 
-    fn request_active_layer(&mut self, layer: BoundedU8<LAYERS>) {
+    fn request_active_layer(&mut self, layer: BoundedU8<{LAYOUT_LAYERS::<LytShape>}>) {
         dev_info!("New layer requested: {}", layer.value());
         self.requested_layer = layer;
     }
 
-    fn push_layer(&mut self, new_layer: BoundedU8<LAYERS>) {
+    fn push_layer(&mut self, new_layer: BoundedU8<{LAYOUT_LAYERS::<LytShape>}>) {
         // Always push the requested_layer into the stack. In case there are
         // multiple requests in the same scan to push a layer, we consider all
         // of them.
@@ -782,7 +759,7 @@ where
         self.request_active_layer(new_layer);
     }
 
-    fn pop_layer(&mut self) -> Option<BoundedU8<LAYERS>> {
+    fn pop_layer(&mut self) -> Option<BoundedU8<{LAYOUT_LAYERS::<LytShape>}>> {
         if let Some(head) = self.layers_stack.pop() {
             let prev = self.requested_layer;
             dev_trace!("Popped layer: {}", head);
@@ -795,14 +772,8 @@ where
     }
 }
 
-impl<K: HandleKey, const LAYERS: u8, const ROWS: u8, const COLS: u8> KeyboardStateLike
-    for KeyboardState<K, LAYERS, ROWS, COLS>
-where
-    [(); LAYERS as usize]:,
-    [(); COLS as usize]:,
-    [(); ROWS as usize]:,
-    [(); valid_matrix_size!(ROWS, COLS)]:,
-    ConstCond<{ LAYERS > 0 }>: IsTrue,
+impl<K: HandleKey, LytShape: TLayoutShape> KeyboardStateLike
+    for KeyboardState<K, LytShape>
 {
     fn push_layer_raw(&mut self, new_layer: u8) -> Option<u8> {
         let Some(layer_index) = Self::validate_requested_layer(new_layer) else {
@@ -848,36 +819,17 @@ where
 pub struct SplitKeyboardLayout<
     C: SplitLayoutConfig,
     Key,
-    const LAYERS: u8,
-    const ROWS: u8,
-    const COLS: u8,
-> where
-    [(); LAYERS as usize]:,
-    [(); COLS as usize]:,
-    [(); ROWS as usize]:,
+    LytShape: TLayoutShape
+>
 {
     _config: PhantomData<C>,
-    layers: [LayoutLayer<Key, ROWS, COLS>; LAYERS as usize],
+    layers: [LayoutLayer<Key, LytShape::MatrixShape>; U8_AS_USIZE::<{LAYOUT_LAYERS::<LytShape>}>],
 }
 
-impl<C: SplitLayoutConfig, Key, const LAYERS: u8, const ROWS: u8, const COLS: u8>
-    SplitKeyboardLayout<C, Key, LAYERS, ROWS, COLS>
-where
-    [(); LAYERS as usize]:,
-    [(); COLS as usize]:,
-    [(); ROWS as usize]:,
+impl<C: SplitLayoutConfig, Key, LytShape: TLayoutShape>
+    SplitKeyboardLayout<C, Key, LytShape>
 {
-    const fn assert_config_ok() {
-        assert!(
-            C::SPLIT_RIGHT_COL_OFFSET < COLS,
-            "Invalid layout config: Split column offset must be less than the number of columns"
-        );
-        assert!(LAYERS > 0, "There must be at least 1 layer in the layout!");
-    }
-
-    pub const fn new(layers: [LayoutLayer<Key, ROWS, COLS>; LAYERS as usize]) -> Self {
-        const { Self::assert_config_ok() };
-
+    pub const fn new(layers: [LayoutLayer<Key, LytShape::MatrixShape>; U8_AS_USIZE::<{LAYOUT_LAYERS::<LytShape>}>]) -> Self {
         Self {
             _config: PhantomData,
             layers,
@@ -897,7 +849,7 @@ where
     }
 
     #[inline(always)]
-    fn get_key_definition(&self, layer: BoundedU8<LAYERS>, real_row: u8, real_col: u8) -> &Key {
+    fn get_key_definition(&self, layer: BoundedU8<{LAYOUT_LAYERS::<LytShape>}>, real_row: u8, real_col: u8) -> &Key {
         self.layers[layer.value() as usize].get_key_definition(real_row, real_col)
     }
 }

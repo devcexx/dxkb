@@ -4,6 +4,7 @@ use cortex_m::interrupt::{free, Mutex};
 use dxkb_common::util::RingBuffer;
 use log::{Level, Log, SetLoggerError};
 use core::fmt::Write;
+use cortex_m::iprintln;
 
 struct WriterRingBuffer<const SIZE: usize> {
     buf: RingBuffer<u8, SIZE>
@@ -23,16 +24,18 @@ impl<const SIZE: usize> core::fmt::Write for WriterRingBuffer<SIZE> {
 
 pub struct RingBufferLogger<const SIZE: usize> {
     log_level: Level,
-    buf: Mutex<RefCell<WriterRingBuffer<SIZE>>>
+    buf: Mutex<RefCell<WriterRingBuffer<SIZE>>>,
+    itm_enable: bool
 }
 
 impl<const SIZE: usize> RingBufferLogger<SIZE> {
-    pub const fn new(level: Level, buf: RingBuffer<u8, SIZE>) -> Self {
+    pub const fn new(level: Level, buf: RingBuffer<u8, SIZE>, itm_enable: bool) -> Self {
         Self {
             log_level: level,
             buf: Mutex::new(RefCell::new(WriterRingBuffer {
                 buf
-            }))
+            })),
+            itm_enable
         }
     }
 
@@ -62,13 +65,19 @@ impl<const SIZE: usize> Log for RingBufferLogger<SIZE> {
 
     fn log(&self, record: &log::Record) {
         free(|cs| {
-            write!(
+            let _ = write!(
                 self.buf.borrow(cs).borrow_mut(),
                 "{:<5} [{}] {}\n",
                 record.level(),
                 record.target(),
                 record.args()
-            ).unwrap();
+            );
+
+            if self.itm_enable {
+                let itm = unsafe { &mut *cortex_m::peripheral::ITM::ptr() };
+                let stim = &mut itm.stim[0];
+                iprintln!(stim, "{:<5} [{}] {}", record.level(), record.target(), record.args());
+            }
         });
     }
 

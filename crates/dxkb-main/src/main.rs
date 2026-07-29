@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 #![allow(static_mut_refs)]
-#![feature(generic_const_exprs)]
 #![feature(const_index)]
 #![feature(const_trait_impl)]
 #![feature(core_intrinsics)]

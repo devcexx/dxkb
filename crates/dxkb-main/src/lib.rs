@@ -4,7 +4,6 @@
 #![allow(static_mut_refs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![deny(rustdoc::bare_urls)]
-#![feature(generic_const_exprs)]
 
 use core::marker::PhantomData;
 
