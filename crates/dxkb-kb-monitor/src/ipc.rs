@@ -3,18 +3,17 @@ use std::{
     io,
     marker::PhantomData,
     pin::Pin,
-    task::{self, Context, Poll, ready},
-    time::Duration,
+    task::{self, Context, Poll, ready}
 };
 
 use bitcode::{DecodeOwned, Encode};
 use futures::{
-    FutureExt, Stream, StreamExt,
+    Stream, StreamExt,
     future::join_all,
     stream::SelectAll,
 };
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf},
+    io::{AsyncRead, AsyncWriteExt, ReadBuf},
     net::{
         UnixListener, UnixStream,
     },
@@ -86,9 +85,6 @@ impl IpcServer {
         loop {
             // Futures may be selected multiple times if the polled future haven't generated an actual event
             select! {
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                    eprintln!("Heartbeat: {}", self.streams.len());
-                },
                 accept_res = self.sock.accept() => {
                     match accept_res {
                         Ok((socket, _)) => {
@@ -149,28 +145,6 @@ impl IpcServer {
             id
         ))
     }
-}
-
-pub async fn transfer(
-    message: &IpcMessageDown,
-    out: &mut (impl AsyncWrite + Unpin),
-) -> io::Result<()> {
-    let enc = bitcode::encode(message);
-    if enc.len() > u16::MAX as usize {
-        panic!("Message too large to send over IPC: {} bytes", enc.len());
-    }
-
-    out.write_u16(enc.len() as u16).await?;
-    out.write_all(&enc).await?;
-    Ok(())
-}
-
-pub async fn recv(input: &mut (impl AsyncRead + Unpin)) -> anyhow::Result<IpcMessageDown> {
-    let len = input.read_u16().await? as usize;
-    let mut inbuf = vec![0; len]; // TODO avoid too many allocations here
-    input.read_buf(&mut inbuf).await?;
-
-    Ok(bitcode::decode(&inbuf)?)
 }
 
 #[derive(Debug)]
